@@ -1,21 +1,29 @@
 mod game;
 
-use crate::game::agents::Color;
-use crate::game::Game;
+use game::errors::InvalidAction;
+use game::{bitboard::Bitboard, Game, BOARD_SIZE};
 
 fn main() {
-    let mut game = Game::new();
-    game.step(1160);
-    game.step(0);
-    game.step(1160);
-    game.step(0);
-    game.step(42);
-    let boards = game.observe(0).boards;
-    println!(
-        "{}",
-        boards[Color::Blue as usize]
-            | boards[Color::Yellow as usize]
-            | boards[Color::Red as usize]
-            | boards[Color::Green as usize]
-    );
+    let mut env: Game = Game::new();
+    // println!(
+    //     "{}",
+    //     (env.action_set[21311].bitboard.dilate_ortho() & env.action_set[5053].bitboard).is_empty()
+    // );
+    env.step(22926);
+    env.step(780);
+    env.step(5395);
+    env.step(20665);
+    env.observe(env.agent_selection);
+    env.step(15561);
+    env.observe(env.agent_selection);
+    env.step(20700);
+    env.observe(env.agent_selection);
+    env.step(10812);
+    env.observe(env.agent_selection);
+    env.step(15834);
+    env.observe(env.agent_selection);
+    env.step(28283);
+    env.observe(env.agent_selection);
+    env.step(26885);
+    env.render();
 }
