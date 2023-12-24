@@ -3,14 +3,14 @@ use std::ops;
 use std::usize;
 
 pub const BOARD_SIZE: usize = 20;
-const MAX_IDX: usize = (BOARD_SIZE * (BOARD_SIZE + 1)) - 1;
+pub const MAX_IDX: usize = (BOARD_SIZE * (BOARD_SIZE + 1)) - 1;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Bitboard(pub u128, pub u128, pub u128, pub u128);
 
 impl Bitboard {
     pub fn is_empty(&self) -> bool {
-        self.0 + self.1 + self.2 + self.3 == 0
+        ((self.0 & u128::MAX >> 92) | self.1 | self.2 | self.3) == 0
     }
 
     pub fn translate_origin(self, x: usize, y: usize) -> Bitboard {
@@ -28,7 +28,7 @@ impl Bitboard {
         self.mirror_diagonal().flip()
     }
 
-    fn bit_lookup(&self, bit_idx: usize) -> bool {
+    pub fn bit_lookup(&self, bit_idx: usize) -> bool {
         match bit_idx {
             0..=127 => self.3 & 1 << bit_idx != 0,
             128..=255 => self.2 & 1 << (bit_idx - 128) != 0,
@@ -58,8 +58,8 @@ impl Bitboard {
         board_flip
     }
 
-    pub fn mirror_diagonal(&self) -> Bitboard {
-        let mut board_mirror = self.clone();
+    pub fn mirror_diagonal(self) -> Bitboard {
+        let mut board_mirror = self;
 
         for i in 1..BOARD_SIZE {
             for j in 0..(i + 1) {
@@ -76,53 +76,34 @@ impl Bitboard {
         board_mirror
     }
 
-    pub fn mirror_antidiagonal(&self) -> Bitboard {
-        let mut board_mirror = self.clone();
-
-        for j in 0..BOARD_SIZE - 1 {
-            for i in 0..BOARD_SIZE - j - 1 {
-                let idx_upper = (BOARD_SIZE + 1) * j + i;
-                let idx_lower = (BOARD_SIZE + 1) * (BOARD_SIZE - i - 1) + (BOARD_SIZE - i - 1);
-                let bit_upper = self.bit_lookup(idx_upper);
-                let bit_lower = self.bit_lookup(idx_lower);
-                if (bit_upper && !bit_lower) || (bit_lower && !bit_upper) {
-                    board_mirror.bit_flip(idx_lower);
-                    board_mirror.bit_flip(idx_upper);
-                }
-            }
-        }
-        board_mirror
-    }
-
     pub fn dilate_ortho(self) -> Bitboard {
         let left = self >> 1;
-        let up = self >> BOARD_SIZE + 1;
+        let up = self >> (BOARD_SIZE + 1);
         let right = self << 1;
-        let down = self << BOARD_SIZE + 1;
+        let down = self << (BOARD_SIZE + 1);
         (self | left | right | up | down) & separating_bit_mask()
     }
 
     pub fn dilate_diag(self) -> Bitboard {
-        let left_up = self >> BOARD_SIZE + 2;
+        let left_up = self >> (BOARD_SIZE + 2);
         let right_up = self >> BOARD_SIZE;
         let left_down = self << BOARD_SIZE;
-        let right_down = self << BOARD_SIZE + 2;
+        let right_down = self << (BOARD_SIZE + 2);
         (self | left_up | left_down | right_up | right_down) & separating_bit_mask()
     }
 
-    fn shl_base(self, lhs: usize) -> Self {
-        match lhs {
-            0 => self,
-            _ => Bitboard(
-                (self.0 << lhs) | (self.1 >> (128 - lhs)),
-                (self.1 << lhs) | (self.2 >> (128 - lhs)),
-                (self.2 << lhs) | (self.3 >> (128 - lhs)),
-                self.3 << lhs,
-            ),
-        }
+    pub fn into_vecs(self) -> [[bool; BOARD_SIZE]; BOARD_SIZE] {
+        let mut bitvecs = [[false; BOARD_SIZE]; BOARD_SIZE];
+        let _: Vec<_> = (0..BOARD_SIZE * BOARD_SIZE)
+            .filter(|i| (i == &0) || ((i % BOARD_SIZE + 1) != 0))
+            .map(|i| {
+                bitvecs[i / BOARD_SIZE][i % BOARD_SIZE] = self.bit_lookup(i);
+            })
+            .collect();
+        bitvecs
     }
 
-    fn shl_base_assign(&mut self, lhs: usize) {
+    fn shl_assign(&mut self, lhs: usize) {
         if lhs > 0 {
             self.0 = (self.0 << lhs) | (self.1 >> (128 - lhs));
             self.1 = (self.1 << lhs) | (self.2 >> (128 - lhs));
@@ -131,19 +112,7 @@ impl Bitboard {
         }
     }
 
-    fn shr_base(self, rhs: usize) -> Self {
-        match rhs {
-            0 => self,
-            _ => Bitboard(
-                self.0 >> rhs,
-                (self.1 >> rhs) | (self.0 << (128 - rhs)),
-                (self.2 >> rhs) | (self.1 << (128 - rhs)),
-                (self.3 >> rhs) | (self.2 << (128 - rhs)),
-            ),
-        }
-    }
-
-    fn shr_base_assign(&mut self, rhs: usize) {
+    fn shr_assign(&mut self, rhs: usize) {
         if rhs > 0 {
             self.3 = (self.3 >> rhs) | (self.2 << (128 - rhs));
             self.2 = (self.2 >> rhs) | (self.1 << (128 - rhs));
@@ -234,10 +203,10 @@ impl ops::Shl<usize> for Bitboard {
         let mut lhs_cntr = lhs;
         let mut shifted = self;
         while lhs_cntr > 127 {
-            shifted.shl_base_assign(127);
+            shifted.shl_assign(127);
             lhs_cntr -= 127;
         }
-        shifted.shl_base_assign(lhs_cntr);
+        shifted.shl_assign(lhs_cntr);
         shifted
     }
 }
@@ -249,10 +218,10 @@ impl ops::Shr<usize> for Bitboard {
         let mut rhs_cntr = rhs;
         let mut shifted = self;
         while rhs_cntr > 127 {
-            shifted.shr_base_assign(127);
+            shifted.shr_assign(127);
             rhs_cntr -= 127;
         }
-        shifted.shr_base_assign(rhs_cntr);
+        shifted.shr_assign(rhs_cntr);
         shifted
     }
 }

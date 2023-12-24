@@ -16,7 +16,7 @@ impl PyBlokus {
         Self(Game::new())
     }
 
-    pub fn reset(&mut self) -> () {
+    pub fn reset(&mut self) {
         self.0 = Game::new();
     }
 
@@ -62,11 +62,11 @@ impl PyBlokus {
     }
 
     pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
-        let res = self.0.step(action_idx)?;
-        Ok(res)
+        self.0.step(action_idx)?;
+        Ok(())
     }
 
-    pub fn render(&self) -> () {
+    pub fn render(&self) {
         self.0.render();
     }
 }

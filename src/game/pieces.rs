@@ -4,30 +4,34 @@ use super::bitboard::{Bitboard, BOARD_SIZE};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
 pub enum PieceType {
-    I1,
-    I2,
-    V3,
-    I3,
-    T4,
-    O,
-    L4,
-    I4,
-    Z4,
-    F,
-    X,
-    P,
-    W,
-    Z5,
-    Y,
-    L5,
-    U,
-    T5,
-    V5,
-    N,
-    I5,
+    I1 = 1,
+    I2 = 2,
+    V3 = 3,
+    I3 = 9,
+    T4 = 10,
+    O = 16,
+    L4 = 22,
+    I4 = 28,
+    Z4 = 34,
+    F = 35,
+    X = 41,
+    P = 47,
+    W = 53,
+    Z5 = 59,
+    Y = 65,
+    L5 = 71,
+    U = 77,
+    T5 = 83,
+    V5 = 89,
+    N = 95,
+    I5 = 101,
 }
 
 impl PieceType {
+    pub fn size(&self) -> u8 {
+        (*self as u8) % 6
+    }
+
     pub fn iter() -> impl Iterator<Item = PieceType> {
         [
             PieceType::I1,
@@ -84,6 +88,7 @@ impl RowEncoding {
         };
         if let Some(x) = self.2 {
             row.insert(x, 0);
+            row.pop();
         }
         row
     }
@@ -227,8 +232,8 @@ pub fn generate_pieces() -> Vec<Piece> {
                 RowBuilder(0, 1).build(),
             ],
             rotation: 1,
-            max_row: BOARD_SIZE - 2,
-            max_col: BOARD_SIZE - 3,
+            max_row: BOARD_SIZE - 3,
+            max_col: BOARD_SIZE - 2,
         },
         Piece {
             piece_type: PieceType::T4,

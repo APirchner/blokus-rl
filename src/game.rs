@@ -83,15 +83,6 @@ impl Game {
         ]
     }
 
-    pub fn truncations(&self) -> [bool; 4] {
-        [
-            self.agents[0].done,
-            self.agents[1].done,
-            self.agents[2].done,
-            self.agents[3].done,
-        ]
-    }
-
     pub fn rewards(&self) -> Option<Vec<u8>> {
         let game_done = self.terminations().iter().all(|x| *x);
         if !game_done {
@@ -115,7 +106,7 @@ impl Game {
                 _ => 0,
             })
             .collect();
-        return Some(scores);
+        Some(scores)
     }
 
     pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
@@ -129,7 +120,7 @@ impl Game {
                     "Action mask is stale, call observe() first!".to_owned(),
                 ));
             }
-            let action = self.action_set[action_idx].clone();
+            let action = self.action_set[action_idx];
             self.execute_action(&action);
 
             for a in self.agents.iter_mut() {
@@ -171,7 +162,7 @@ impl Game {
             .collect();
     }
 
-    pub fn render(&self) -> () {
+    pub fn render(&self) {
         println!("{}", self);
     }
 }
@@ -194,7 +185,7 @@ fn check_action_valid(action_board: Bitboard, boards: &[Bitboard; 4]) -> bool {
     let not_ortho = (action_board & boards[0].dilate_ortho()).is_empty();
     let diag = !(action_board & boards[0].dilate_diag()).is_empty();
     let not_neigbors = (action_board & (boards[1] | boards[2] | boards[3])).is_empty();
-    return not_ortho & diag & not_neigbors;
+    not_ortho & diag & not_neigbors
 }
 
 impl fmt::Display for Game {
