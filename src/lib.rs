@@ -47,10 +47,9 @@ impl PyBlokus {
 
     #[getter(rewards)]
     pub fn rewards(&self) -> Vec<u8> {
-        match self.0.rewards() {
-            Some(x) => x,
-            None => vec![0u8; self.0.num_agents],
-        }
+        self.0
+            .rewards()
+            .map_or_else(|| vec![0u8; self.0.num_agents], |x| x)
     }
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {

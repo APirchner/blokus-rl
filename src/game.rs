@@ -4,13 +4,13 @@ pub mod bitboard;
 pub mod errors;
 mod pieces;
 
-use std::fmt;
-
 use self::actions::{Action, ActionSet};
 use self::agents::{Agent, Color};
 pub use self::bitboard::BOARD_SIZE;
 use self::bitboard::{Bitboard, MAX_IDX};
 use self::errors::InvalidAction;
+use std::fmt;
+use std::fmt::Write as _;
 
 pub struct Game {
     pub action_set: ActionSet,
@@ -192,14 +192,14 @@ impl fmt::Display for Game {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let boards = self.align_boards(0);
 
-        let horizontal: String = "-".repeat(3 * BOARD_SIZE + 43);
+        let horizontal = "-".repeat(3 * BOARD_SIZE + 43);
         let mut board = String::from("  | ");
         let header = (0..BOARD_SIZE)
             .map(|x| format!("{:>2}", x.to_string()))
             .collect::<Vec<String>>()
             .join(" | ");
-        board.push_str(&header);
-        board.push_str(&format!(" |\n{}\n{:>2}", horizontal, 0));
+        let _ = write!(board, "{header}");
+        let _ = write!(board, " |\n{}\n{:>2}", horizontal, 0);
 
         let mut line_break: usize = BOARD_SIZE;
         for i in 0..MAX_IDX {
@@ -211,7 +211,7 @@ impl fmt::Display for Game {
                 None => board.push_str("|  . "),
             }
             if i == line_break {
-                board.push_str(&format!("\n{}\n{:>2}", horizontal, i / BOARD_SIZE));
+                let _ = write!(board, "\n{}\n{:>2}", horizontal, i / BOARD_SIZE);
                 line_break += 21;
             }
         }
