@@ -112,13 +112,13 @@ impl Game {
     pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
         let agent = &self.agents[self.agent_selection];
         if !agent.done {
-            if !agent.action_mask[action_idx] {
-                return Err(InvalidAction::new("Action index not available".to_owned()));
-            }
             if agent.action_mask_stale && agent.turn > 0 {
                 return Err(InvalidAction::new(
                     "Action mask is stale, call observe() first!".to_owned(),
                 ));
+            }
+            if !agent.action_mask[action_idx] {
+                return Err(InvalidAction::new("Action index not available".to_owned()));
             }
             let action = self.action_set[action_idx];
             self.execute_action(&action);

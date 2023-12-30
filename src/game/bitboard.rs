@@ -94,12 +94,19 @@ impl Bitboard {
 
     pub fn into_vecs(self) -> [[bool; BOARD_SIZE]; BOARD_SIZE] {
         let mut bitvecs = [[false; BOARD_SIZE]; BOARD_SIZE];
-        let _: Vec<_> = (0..BOARD_SIZE * BOARD_SIZE)
-            .filter(|i| (i == &0) || ((i % BOARD_SIZE + 1) != 0))
-            .map(|i| {
-                bitvecs[i / BOARD_SIZE][i % BOARD_SIZE] = self.bit_lookup(i);
-            })
-            .collect();
+        let mut r = 0usize;
+        let mut c = 0usize;
+        let mut line_break = 20usize;
+        for i in 0..MAX_IDX {
+            if i == line_break {
+                r += 1;
+                c = 0;
+                line_break += 21;
+            } else {
+                bitvecs[r][c] = self.bit_lookup(i);
+                c += 1;
+            }
+        }
         bitvecs
     }
 
