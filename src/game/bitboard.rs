@@ -14,9 +14,10 @@ impl Bitboard {
     }
 
     pub fn translate_origin(self, x: usize, y: usize) -> Bitboard {
-        if x >= BOARD_SIZE || y >= BOARD_SIZE {
-            panic!("Invalid translation of (0,0) to ({},{})", x, y);
-        }
+        assert!(
+            x < BOARD_SIZE && y < BOARD_SIZE,
+            "Invalid translation of (0,0) to ({x},{y})"
+        );
         self << ((BOARD_SIZE + 1) * y + x)
     }
 
@@ -34,7 +35,7 @@ impl Bitboard {
             128..=255 => self.2 & 1 << (bit_idx - 128) != 0,
             256..=383 => self.1 & 1 << (bit_idx - 2 * 128) != 0,
             384..=MAX_IDX => self.0 & 1 << (bit_idx - 3 * 128) != 0,
-            _ => panic!("Bitboard index {} out of range [0, {}]", bit_idx, MAX_IDX),
+            _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
         }
     }
 
@@ -44,16 +45,16 @@ impl Bitboard {
             128..=255 => self.2 ^= 1 << (bit_idx - 128),
             256..=383 => self.1 ^= 1 << (bit_idx - 2 * 128),
             384..=MAX_IDX => self.0 ^= 1 << (bit_idx - 3 * 128),
-            _ => panic!("Bitboard index {} out of range [0, {}]", bit_idx, MAX_IDX),
+            _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
         }
     }
 
     pub fn flip(self) -> Bitboard {
         let mut board_flip = Bitboard::default();
         for i in 0..BOARD_SIZE {
-            let rshift = (BOARD_SIZE + 1) * i;
-            let lshift = (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - i);
-            board_flip |= ((self >> rshift) & row_mask()) << lshift;
+            let right_shift = (BOARD_SIZE + 1) * i;
+            let left_shift = (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - i);
+            board_flip |= ((self >> right_shift) & row_mask()) << left_shift;
         }
         board_flip
     }

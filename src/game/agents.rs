@@ -52,6 +52,6 @@ impl fmt::Debug for Agent {
             .field("turn", &self.turn)
             .field("pieces", &self.pieces)
             .field("done", &self.done)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
