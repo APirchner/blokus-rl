@@ -16,4 +16,4 @@ dependencies = ["pettingzoo==1.24.2", "pygame==2.5.2"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "blokus_rl._blokus"
-python-source = "blokus_rl"
+python-source = "python"

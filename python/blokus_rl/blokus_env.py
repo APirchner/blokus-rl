@@ -27,17 +27,24 @@ class BlokusEnv(AECEnv):
             i: spaces.Dict(
                 {
                     "observation": spaces.Box(
-                        low=0, high=1, shape=(self.num_agents, 20, 20), dtype=bool
+                        low=0,
+                        high=1,
+                        shape=(self.num_agents, 20, 20),
+                        dtype=bool,
                     ),
                     "action_mask": spaces.Box(
-                        low=0, high=1, shape=(self._env.num_actions,), dtype=np.int8
+                        low=0,
+                        high=1,
+                        shape=(self._env.num_actions,),
+                        dtype=np.int8,
                     ),
                 }
             )
             for i in self.agents
         }
         self._action_spaces = {
-            i: spaces.Discrete(self._env.num_actions, seed=seed) for i in self.agents
+            i: spaces.Discrete(self._env.num_actions, seed=seed)
+            for i in self.agents
         }
         self._cumulative_rewards = {i: 0 for i in self.agents}
         self._infos = {i: {} for i in self.agents}
@@ -60,15 +67,23 @@ class BlokusEnv(AECEnv):
 
     @property
     def terminations(self) -> dict[int, bool]:
-        return {i: self._env.terminations[int(i.split("_")[1])] for i in self.agents}
+        return {
+            i: self._env.terminations[int(i.split("_")[1])]
+            for i in self.agents
+        }
 
     @property
     def truncations(self) -> dict[int, bool]:
-        return {i: self._env.terminations[int(i.split("_")[1])] for i in self.agents}
+        return {
+            i: self._env.terminations[int(i.split("_")[1])]
+            for i in self.agents
+        }
 
     @property
     def rewards(self) -> dict[int, dict[str, Any]]:
-        return {i: self._env.rewards[int(i.split("_")[1])] for i in self.agents}
+        return {
+            i: self._env.rewards[int(i.split("_")[1])] for i in self.agents
+        }
 
     @property
     def infos(self) -> dict[int, bool]:
@@ -88,11 +103,15 @@ class BlokusEnv(AECEnv):
             self._clock = pygame.time.Clock()
             return
         elif self._render_mode == "rgb_array":
-            self_screen = pygame.Surface((self._screen_size, self._screen_size))
+            self.screen = pygame.Surface(
+                (self._screen_size, self._screen_size)
+            )
             return
         raise NotImplementedError
 
-    def reset(self, seed: int | None = None, options: dict | None = None) -> None:
+    def reset(
+        self, seed: int | None = None, options: dict | None = None
+    ) -> None:
         self._cumulative_rewards = {i: 0 for i in self.agents}
         self._info = {i: {} for i in self.agents}
         for a in self._action_spaces:
@@ -109,7 +128,7 @@ class BlokusEnv(AECEnv):
             self.render()
 
     @lru_cache(maxsize=4, typed=True)
-    def observe(self, agent: str) -> dict | None:
+    def observe(self, agent: str) -> dict:
         obs = self._env.observe(int(agent.split("_")[1]))
         return {
             "observation": np.array(obs.observation, dtype=bool),
@@ -178,15 +197,3 @@ class BlokusEnv(AECEnv):
 
     def close(self) -> None:
         ...
-
-
-if __name__ == "__main__":
-    env = BlokusEnv(render_mode="human")
-    env.reset()
-    for i, agent in enumerate(env.agent_iter()):
-        observation, reward, termination, truncation, info = env.last()
-        action = env.action_space(agent).sample(mask=observation["action_mask"])
-        env.step(action)
-        if all([t[1] for t in env.terminations.items()]):
-            break
-    print(env.rewards)
