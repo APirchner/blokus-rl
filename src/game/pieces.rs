@@ -108,7 +108,7 @@ impl Piece {
         let bits: Vec<u8> = self.encoding.iter().fold(Vec::new(), |acc, enc| {
             [acc, enc.decode_row(), vec![0; 1]].concat()
         });
-        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from((*bit));
+        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit);
         bits.iter().rev().fold(0, parse_bits)
     }
 

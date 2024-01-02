@@ -278,7 +278,7 @@ pub fn separating_bit_mask() -> Bitboard {
     let bits: Vec<u8> = (0..BOARD_SIZE).fold(Vec::new(), |acc: Vec<u8>, _| {
         [acc, vec![1; BOARD_SIZE], vec![0; 1]].concat()
     });
-    let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from((*bit));
+    let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit);
 
     Bitboard(
         bits[384..].iter().rev().fold(0, parse_bits),
