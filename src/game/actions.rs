@@ -26,15 +26,15 @@ impl ActionSet {
             let piece_actions: Vec<Action> = iter::zip(piece_placements, iter::repeat(p))
                 .enumerate()
                 .map(|x| Action {
-                    piece_type: x.1 .1.piece_type,
+                    piece_type: x.1 .1.name,
                     bitboard: x.1 .0,
                 })
                 .collect();
-            let piece_tmp = piece_map.get(&p.piece_type);
+            let piece_tmp = piece_map.get(&p.name);
             match piece_tmp {
                 Some(x) => {
                     piece_map.insert(
-                        p.piece_type,
+                        p.name,
                         Range {
                             start: x.start,
                             end: action_idx + piece_actions.len(),
@@ -43,7 +43,7 @@ impl ActionSet {
                 }
                 None => {
                     piece_map.insert(
-                        p.piece_type,
+                        p.name,
                         Range {
                             start: action_idx,
                             end: action_idx + piece_actions.len(),
