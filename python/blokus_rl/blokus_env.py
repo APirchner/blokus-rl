@@ -6,7 +6,7 @@ from gymnasium import spaces
 from pettingzoo import AECEnv
 import pygame
 
-from _blokus import PyBlokus
+from blokus_rl._blokus import PyBlokus
 
 
 class BlokusEnv(AECEnv):
