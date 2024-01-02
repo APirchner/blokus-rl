@@ -28,8 +28,8 @@ pub enum PieceType {
 }
 
 impl PieceType {
-    pub fn size(&self) -> u8 {
-        (*self as u8) % 6
+    pub fn size(self) -> u8 {
+        self as u8 % 6
     }
 
     pub fn iter() -> impl Iterator<Item = PieceType> {
@@ -108,7 +108,7 @@ impl Piece {
         let bits: Vec<u8> = self.encoding.iter().fold(Vec::new(), |acc, enc| {
             [acc, enc.decode_row(), vec![0; 1]].concat()
         });
-        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + (*bit) as u128;
+        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from((*bit));
         bits.iter().rev().fold(0, parse_bits)
     }
 
@@ -147,7 +147,8 @@ impl PartialOrd for Piece {
     }
 }
 
-pub fn generate_pieces() -> Vec<Piece> {
+#[allow(clippy::too_many_lines)]
+pub fn generate() -> Vec<Piece> {
     let mut pieces = vec![
         // I1, 1x
         Piece {

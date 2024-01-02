@@ -22,7 +22,7 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let action_set = ActionSet::new(&pieces::generate_pieces());
+        let action_set = ActionSet::new(&pieces::generate());
         let agents = [
             Agent::new(Color::Blue, action_set.initial_actions()),
             Agent::new(Color::Yellow, action_set.initial_actions()),
@@ -123,7 +123,7 @@ impl Game {
             let action = self.action_set[action_idx];
             self.execute_action(&action);
 
-            for a in self.agents.iter_mut() {
+            for a in &mut self.agents {
                 a.action_mask_stale = true;
             }
         }
@@ -163,7 +163,7 @@ impl Game {
     }
 
     pub fn render(&self) {
-        println!("{}", self);
+        println!("{self}");
     }
 }
 
@@ -215,7 +215,7 @@ impl fmt::Display for Game {
                 line_break += 21;
             }
         }
-        write!(f, "{}|", board)
+        write!(f, "{board}|")
     }
 }
 
@@ -225,6 +225,6 @@ impl fmt::Debug for Game {
             .field("agents", &self.agents)
             .field("num_agents", &self.num_agents)
             .field("agent_selection", &self.agent_selection)
-            .finish()
+            .finish_non_exhaustive()
     }
 }

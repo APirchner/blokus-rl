@@ -62,7 +62,7 @@ impl Bitboard {
         let mut board_mirror = self;
 
         for i in 1..BOARD_SIZE {
-            for j in 0..(i + 1) {
+            for j in 0..=i {
                 let idx_upper = (BOARD_SIZE + 1) * j + i;
                 let idx_lower = (BOARD_SIZE + 1) * i + j;
                 let bit_upper = self.bit_lookup(idx_upper);
@@ -246,9 +246,10 @@ impl fmt::Display for Bitboard {
 
         let mut line_break: usize = 20;
         for i in 0..MAX_IDX {
-            match self.bit_lookup(i) {
-                true => board.push_str("|  x "),
-                _ => board.push_str("|  . "),
+            if self.bit_lookup(i) {
+                board.push_str("|  x ");
+            } else {
+                board.push_str("|  . ");
             }
             if i == line_break {
                 board.push_str(&format!("\n{}\n{:>2}", horizontal, i / BOARD_SIZE));
@@ -256,7 +257,7 @@ impl fmt::Display for Bitboard {
             }
         }
         board.push_str("|  .");
-        write!(f, "{}", board)
+        write!(f, "{board}")
     }
 }
 
@@ -269,7 +270,7 @@ fn row_mask() -> Bitboard {
             .concat()
             .iter()
             .rev()
-            .fold(0, |acc: u128, bit: &u8| (acc << 1) + (*bit) as u128),
+            .fold(0, |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit)),
     )
 }
 
@@ -277,7 +278,7 @@ pub fn separating_bit_mask() -> Bitboard {
     let bits: Vec<u8> = (0..BOARD_SIZE).fold(Vec::new(), |acc: Vec<u8>, _| {
         [acc, vec![1; BOARD_SIZE], vec![0; 1]].concat()
     });
-    let parse_bits = |acc: u128, bit: &u8| (acc << 1) + (*bit) as u128;
+    let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from((*bit));
 
     Bitboard(
         bits[384..].iter().rev().fold(0, parse_bits),
