@@ -176,19 +176,23 @@ mod tests {
     #[test]
     fn test_scoring() {
         let mut game = Game::new();
-        let _ = game.step(400);
-        let _ = game.step(400);
-        let _ = game.step(400);
-        let _ = game.step(400);
-        let _ = game.step(22);
-        let _ = game.step(22);
-        let _ = game.step(22);
-        let _ = game.step(22);
+        game.step(400).unwrap();
+        game.step(400).unwrap();
+        game.step(400).unwrap();
+        game.step(400).unwrap();
+        game.observe(0);
+        game.step(22).unwrap();
+        game.observe(1);
+        game.step(22).unwrap();
+        game.observe(2);
         assert!(game.rewards().is_none());
         game.agents[0].done = true;
         game.agents[1].done = true;
         game.agents[2].done = true;
         game.agents[3].done = true;
-        assert!(game.rewards().unwrap().into_iter().all(|x| x == 86));
+        assert_eq!(game.rewards().unwrap()[0], 1);
+        assert_eq!(game.rewards().unwrap()[1], 1);
+        assert_eq!(game.rewards().unwrap()[2], 0);
+        assert_eq!(game.rewards().unwrap()[3], 0);
     }
 }
