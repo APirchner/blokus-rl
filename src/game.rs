@@ -83,7 +83,7 @@ impl Game {
         ]
     }
 
-    pub fn rewards(&self) -> Option<Vec<u8>> {
+    pub fn rewards(&self) -> Option<Vec<i8>> {
         let game_done = self.terminations().iter().all(|x| *x);
         if !game_done {
             return None;
@@ -103,7 +103,7 @@ impl Game {
             .iter()
             .map(|x| match x {
                 _ if min_score == x => 1,
-                _ => 0,
+                _ => -1,
             })
             .collect();
         Some(scores)

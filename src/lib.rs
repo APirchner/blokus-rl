@@ -46,10 +46,10 @@ impl PyBlokus {
     }
 
     #[getter(rewards)]
-    pub fn rewards(&self) -> Vec<u8> {
+    pub fn rewards(&self) -> Vec<i8> {
         self.0
             .rewards()
-            .map_or_else(|| vec![0u8; self.0.num_agents], |x| x)
+            .map_or_else(|| vec![0i8; self.0.num_agents], |x| x)
     }
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {
@@ -115,48 +115,38 @@ mod tests {
     #[test]
     fn test_action_generation_valid() {
         let game = Game::new();
-        for a in game.action_set.actions.into_iter() {
-            if (a.bitboard & !separating_bit_mask()) != Bitboard::default() {
-                println!("{:?}", a);
-                println!("{}", a.bitboard);
-                panic!("Invalid action!");
-            }
+        assert_eq!(game.action_set.actions.len(), 30433);
+        for a in game.action_set.actions {
+            assert!(
+                (a.bitboard & !separating_bit_mask()) == Bitboard::default(),
+                "Invalid action!"
+            );
         }
     }
     #[test]
     fn test_rotation_clock_valid() {
         let game = Game::new();
-        for a in game.action_set.actions.into_iter() {
+        for a in game.action_set.actions {
             let board_rot = a
                 .bitboard
                 .rotate_clock()
                 .rotate_clock()
                 .rotate_clock()
                 .rotate_clock();
-            if board_rot != a.bitboard {
-                println!("{:?}", a);
-                println!("{}", a.bitboard);
-                println!("{}", board_rot);
-                panic!("Invalid rotation!");
-            }
+            assert!(board_rot == a.bitboard, "Invalid rotation!");
         }
     }
     #[test]
     fn test_rotation_anticlock_valid() {
         let game = Game::new();
-        for a in game.action_set.actions.into_iter() {
+        for a in game.action_set.actions {
             let board_rot = a
                 .bitboard
                 .rotate_anticlock()
                 .rotate_anticlock()
                 .rotate_anticlock()
                 .rotate_anticlock();
-            if board_rot != a.bitboard {
-                println!("{:?}", a);
-                println!("{}", a.bitboard);
-                println!("{}", board_rot);
-                panic!("Invalid rotation!");
-            }
+            assert!(board_rot == a.bitboard, "Invalid rotation!");
         }
     }
     #[test]
@@ -192,7 +182,7 @@ mod tests {
         game.agents[3].done = true;
         assert_eq!(game.rewards().unwrap()[0], 1);
         assert_eq!(game.rewards().unwrap()[1], 1);
-        assert_eq!(game.rewards().unwrap()[2], 0);
-        assert_eq!(game.rewards().unwrap()[3], 0);
+        assert_eq!(game.rewards().unwrap()[2], -1);
+        assert_eq!(game.rewards().unwrap()[3], -1);
     }
 }
