@@ -23,7 +23,7 @@ class BlokusEnv(AECEnv):
     ):
         super().__init__()
         self._env = PyBlokus()
-        self.observation_spaces = {
+        self._observation_spaces = {
             i: spaces.Dict(
                 {
                     "observation": spaces.Box(
@@ -42,7 +42,7 @@ class BlokusEnv(AECEnv):
             )
             for i in self.agents
         }
-        self.action_spaces = {
+        self._action_spaces = {
             i: spaces.Discrete(self._env.num_actions, seed=seed)
             for i in self.agents
         }
@@ -89,6 +89,14 @@ class BlokusEnv(AECEnv):
     def infos(self) -> dict[int, bool]:
         return self._infos
 
+    @property
+    def observation_spaces(self):
+        return self._observation_spaces
+
+    @property
+    def action_spaces(self):
+        return self._action_spaces
+
     def _render_setup(self):
         if self._render_mode is None:
             return
@@ -114,8 +122,8 @@ class BlokusEnv(AECEnv):
     ) -> None:
         self._cumulative_rewards = {i: 0 for i in self.agents}
         self._info = {i: {} for i in self.agents}
-        for a in self._action_spaces:
-            self._action_spaces[a].seed(seed)
+        for a in self.action_spaces:
+            self.action_spaces[a].seed(seed)
         self._env.reset()
         self.observe.cache_clear()
         self._render_setup()
@@ -134,12 +142,6 @@ class BlokusEnv(AECEnv):
             "observation": np.array(obs.observation, dtype=bool),
             "action_mask": np.array(obs.action_mask, dtype=np.int8),
         }
-
-    def observation_space(self, agent: str) -> spaces.Dict:
-        return self.observation_spaces[agent]
-
-    def action_space(self, agent: str) -> spaces.Space:
-        return self.action_spaces[agent]
 
     def render(self) -> None:
         obs = self.observe(self.agents[0])["observation"]
