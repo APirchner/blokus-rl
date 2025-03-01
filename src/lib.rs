@@ -94,17 +94,18 @@ impl PyObservation {
     }
 }
 
-#[pymodule]
-fn _blokus(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<PyBlokus>()?;
-    m.add_class::<PyObservation>()?;
-    Ok(())
-}
-
 impl From<InvalidAction> for PyErr {
     fn from(error: InvalidAction) -> Self {
         PyAssertionError::new_err(error.to_string())
     }
+}
+
+#[pymodule]
+mod _blokus {
+    #[pymodule_export]
+    use super::PyBlokus;
+    #[pymodule_export]
+    use super::PyObservation;
 }
 
 #[cfg(test)]

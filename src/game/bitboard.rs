@@ -1,6 +1,5 @@
 use std::fmt;
 use std::ops;
-use std::usize;
 
 pub const BOARD_SIZE: usize = 20;
 pub const MAX_IDX: usize = (BOARD_SIZE * (BOARD_SIZE + 1)) - 1;
@@ -10,7 +9,7 @@ pub struct Bitboard(pub u128, pub u128, pub u128, pub u128);
 
 impl Bitboard {
     pub fn is_empty(&self) -> bool {
-        ((self.0 & u128::MAX >> 92) | self.1 | self.2 | self.3) == 0
+        ((self.0 & (u128::MAX >> 92)) | self.1 | self.2 | self.3) == 0
     }
 
     pub fn translate_origin(self, x: usize, y: usize) -> Bitboard {
@@ -31,10 +30,10 @@ impl Bitboard {
 
     pub fn bit_lookup(&self, bit_idx: usize) -> bool {
         match bit_idx {
-            0..=127 => self.3 & 1 << bit_idx != 0,
-            128..=255 => self.2 & 1 << (bit_idx - 128) != 0,
-            256..=383 => self.1 & 1 << (bit_idx - 2 * 128) != 0,
-            384..=MAX_IDX => self.0 & 1 << (bit_idx - 3 * 128) != 0,
+            0..=127 => self.3 & (1 << bit_idx) != 0,
+            128..=255 => self.2 & (1 << (bit_idx - 128)) != 0,
+            256..=383 => self.1 & (1 << (bit_idx - 2 * 128)) != 0,
+            384..=MAX_IDX => self.0 & (1 << (bit_idx - 3 * 128)) != 0,
             _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
         }
     }
