@@ -46,10 +46,10 @@ impl PyBlokus {
     }
 
     #[getter(rewards)]
-    pub fn rewards(&self) -> Vec<i8> {
+    pub fn rewards(&self) -> Vec<i16> {
         self.0
             .rewards()
-            .map_or_else(|| vec![0i8; self.0.num_agents], |x| x)
+            .map_or_else(|| vec![0i16; self.0.num_agents], |x| x)
     }
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {
@@ -94,17 +94,18 @@ impl PyObservation {
     }
 }
 
-#[pymodule]
-fn _blokus(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_class::<PyBlokus>()?;
-    m.add_class::<PyObservation>()?;
-    Ok(())
-}
-
 impl From<InvalidAction> for PyErr {
     fn from(error: InvalidAction) -> Self {
         PyAssertionError::new_err(error.to_string())
     }
+}
+
+#[pymodule]
+mod _blokus {
+    #[pymodule_export]
+    use super::PyBlokus;
+    #[pymodule_export]
+    use super::PyObservation;
 }
 
 #[cfg(test)]
@@ -180,9 +181,9 @@ mod tests {
         game.agents[1].done = true;
         game.agents[2].done = true;
         game.agents[3].done = true;
-        assert_eq!(game.rewards().unwrap()[0], 1);
-        assert_eq!(game.rewards().unwrap()[1], 1);
-        assert_eq!(game.rewards().unwrap()[2], -1);
-        assert_eq!(game.rewards().unwrap()[3], -1);
+        assert_eq!(game.rewards().unwrap()[0], -86);
+        assert_eq!(game.rewards().unwrap()[1], -86);
+        assert_eq!(game.rewards().unwrap()[2], -87);
+        assert_eq!(game.rewards().unwrap()[3], -87);
     }
 }
