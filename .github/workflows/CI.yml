@@ -90,7 +90,10 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "{python_version}"
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -99,21 +102,23 @@ jobs:
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: sdist
+          name: wheels-sdist
           path: dist
-
   release:
     name: Release
     runs-on: ubuntu-latest
+    permissions:
+      # For PyPI's trusted publishing.
+      id-token: write
     if: startsWith(github.ref, 'refs/tags/')
     needs: [linux, windows, macos, sdist]
-    environment: release
-    permissions:
-          id-token: write
     steps:
       - uses: actions/download-artifact@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "{python_version}"
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         with:
           command: upload
-          args: --non-interactive --skip-existing *
+          args: --non-interactive --skip-existing wheels-*/*
