@@ -106,6 +106,7 @@ jobs:
           path: dist
   release:
     name: Release
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       # For PyPI's trusted publishing.
