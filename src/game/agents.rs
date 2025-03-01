@@ -19,6 +19,7 @@ pub struct Agent {
     pub turn: u8,
     pub pieces: HashMap<PieceType, bool>,
     pub action_mask: Vec<bool>,
+    pub action_mask_stale: bool,
     pub done: bool,
 }
 
@@ -27,6 +28,7 @@ impl Agent {
         let board = Bitboard::default();
         let turn = 0;
         let done = false;
+        let action_mask_stale = false;
         let action_mask = initial_actions;
         let pieces: HashMap<PieceType, bool> =
             iter::zip(PieceType::iter(), iter::repeat(true)).collect();
@@ -36,6 +38,7 @@ impl Agent {
             turn,
             pieces,
             action_mask,
+            action_mask_stale,
             done,
         }
     }
@@ -49,6 +52,6 @@ impl fmt::Debug for Agent {
             .field("turn", &self.turn)
             .field("pieces", &self.pieces)
             .field("done", &self.done)
-            .finish()
+            .finish_non_exhaustive()
     }
 }

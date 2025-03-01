@@ -4,30 +4,34 @@ use super::bitboard::{Bitboard, BOARD_SIZE};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
 pub enum PieceType {
-    I1,
-    I2,
-    V3,
-    I3,
-    T4,
-    O,
-    L4,
-    I4,
-    Z4,
-    F,
-    X,
-    P,
-    W,
-    Z5,
-    Y,
-    L5,
-    U,
-    T5,
-    V5,
-    N,
-    I5,
+    I1 = 1,
+    I2 = 2,
+    V3 = 3,
+    I3 = 9,
+    T4 = 10,
+    O = 16,
+    L4 = 22,
+    I4 = 28,
+    Z4 = 34,
+    F = 35,
+    X = 41,
+    P = 47,
+    W = 53,
+    Z5 = 59,
+    Y = 65,
+    L5 = 71,
+    U = 77,
+    T5 = 83,
+    V5 = 89,
+    N = 95,
+    I5 = 101,
 }
 
 impl PieceType {
+    pub fn size(self) -> u8 {
+        self as u8 % 6
+    }
+
     pub fn iter() -> impl Iterator<Item = PieceType> {
         [
             PieceType::I1,
@@ -84,6 +88,7 @@ impl RowEncoding {
         };
         if let Some(x) = self.2 {
             row.insert(x, 0);
+            row.pop();
         }
         row
     }
@@ -91,7 +96,7 @@ impl RowEncoding {
 
 #[derive(Clone)]
 pub struct Piece {
-    pub piece_type: PieceType,
+    pub name: PieceType,
     encoding: Vec<RowEncoding>,
     rotation: usize,
     max_row: usize,
@@ -103,7 +108,7 @@ impl Piece {
         let bits: Vec<u8> = self.encoding.iter().fold(Vec::new(), |acc, enc| {
             [acc, enc.decode_row(), vec![0; 1]].concat()
         });
-        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + (*bit) as u128;
+        let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit);
         bits.iter().rev().fold(0, parse_bits)
     }
 
@@ -124,13 +129,13 @@ impl Piece {
 
 impl PartialEq for Piece {
     fn eq(&self, other: &Self) -> bool {
-        (self.piece_type, self.rotation) == (other.piece_type, other.rotation)
+        (self.name, self.rotation) == (other.name, other.rotation)
     }
 }
 
 impl Ord for Piece {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.piece_type, self.rotation).cmp(&(other.piece_type, other.rotation))
+        (self.name, self.rotation).cmp(&(other.name, other.rotation))
     }
 }
 
@@ -142,11 +147,12 @@ impl PartialOrd for Piece {
     }
 }
 
-pub fn generate_pieces() -> Vec<Piece> {
+#[allow(clippy::too_many_lines)]
+pub fn generate() -> Vec<Piece> {
     let mut pieces = vec![
         // I1, 1x
         Piece {
-            piece_type: PieceType::I1,
+            name: PieceType::I1,
             encoding: vec![RowBuilder(0, 1).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 1,
@@ -154,14 +160,14 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // I2, 2x
         Piece {
-            piece_type: PieceType::I2,
+            name: PieceType::I2,
             encoding: vec![RowBuilder(0, 2).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 1,
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::I2,
+            name: PieceType::I2,
             encoding: vec![RowBuilder(0, 1).build(); 2],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
@@ -169,28 +175,28 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // V3, 4x
         Piece {
-            piece_type: PieceType::V3,
+            name: PieceType::V3,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(0, 1).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::V3,
+            name: PieceType::V3,
             encoding: vec![RowBuilder(0, 1).build(), RowBuilder(0, 2).build()],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::V3,
+            name: PieceType::V3,
             encoding: vec![RowBuilder(1, 1).build(), RowBuilder(0, 2).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::V3,
+            name: PieceType::V3,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(1, 1).build()],
             rotation: 3,
             max_row: BOARD_SIZE - 2,
@@ -198,14 +204,14 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // I3, 2x
         Piece {
-            piece_type: PieceType::I3,
+            name: PieceType::I3,
             encoding: vec![RowBuilder(0, 3).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 1,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::I3,
+            name: PieceType::I3,
             encoding: vec![RowBuilder(0, 1).build(); 3],
             rotation: 1,
             max_row: BOARD_SIZE - 3,
@@ -213,32 +219,32 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // T4, 4x
         Piece {
-            piece_type: PieceType::T4,
+            name: PieceType::T4,
             encoding: vec![RowBuilder(1, 1).build(), RowBuilder(0, 3).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::T4,
+            name: PieceType::T4,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 1).build(),
             ],
             rotation: 1,
-            max_row: BOARD_SIZE - 2,
-            max_col: BOARD_SIZE - 3,
+            max_row: BOARD_SIZE - 3,
+            max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::T4,
+            name: PieceType::T4,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(1, 1).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::T4,
+            name: PieceType::T4,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -250,7 +256,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // O, 1x
         Piece {
-            piece_type: PieceType::O,
+            name: PieceType::O,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(0, 2).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
@@ -258,21 +264,21 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // L4, 8x
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![RowBuilder(0, 1).build(), RowBuilder(0, 3).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(0, 1).build()],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -283,7 +289,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 1).build(),
@@ -294,7 +300,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 1).build(),
@@ -305,21 +311,21 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(2, 1).build()],
             rotation: 5,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![RowBuilder(2, 1).build(), RowBuilder(0, 3).build()],
             rotation: 6,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::L4,
+            name: PieceType::L4,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 1).build(),
@@ -331,14 +337,14 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // I4, 2x
         Piece {
-            piece_type: PieceType::I4,
+            name: PieceType::I4,
             encoding: vec![RowBuilder(0, 4).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 1,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::I4,
+            name: PieceType::I4,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -351,7 +357,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // Z4, 4x
         Piece {
-            piece_type: PieceType::Z4,
+            name: PieceType::Z4,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -362,7 +368,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::Z4,
+            name: PieceType::Z4,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -373,14 +379,14 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::Z4,
+            name: PieceType::Z4,
             encoding: vec![RowBuilder(1, 2).build(), RowBuilder(0, 2).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::Z4,
+            name: PieceType::Z4,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(1, 2).build()],
             rotation: 3,
             max_row: BOARD_SIZE - 2,
@@ -388,7 +394,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // F, 8x
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -399,7 +405,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -410,7 +416,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 2).build(),
@@ -421,7 +427,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(1, 2).build(),
                 RowBuilder(0, 2).build(),
@@ -432,7 +438,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(2, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -443,7 +449,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -454,7 +460,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -465,7 +471,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::F,
+            name: PieceType::F,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 2).build(),
@@ -477,7 +483,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // X, 1x
         Piece {
-            piece_type: PieceType::X,
+            name: PieceType::X,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -489,7 +495,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // P, 8x
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 2).build(),
@@ -500,7 +506,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 2).build(),
@@ -511,7 +517,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -522,7 +528,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -533,28 +539,28 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(1, 2).build()],
             rotation: 4,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![RowBuilder(1, 2).build(), RowBuilder(0, 3).build()],
             rotation: 5,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(0, 2).build()],
             rotation: 6,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::P,
+            name: PieceType::P,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(0, 3).build()],
             rotation: 7,
             max_row: BOARD_SIZE - 2,
@@ -562,7 +568,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // W, 4x
         Piece {
-            piece_type: PieceType::W,
+            name: PieceType::W,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -573,7 +579,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::W,
+            name: PieceType::W,
             encoding: vec![
                 RowBuilder(1, 2).build(),
                 RowBuilder(0, 2).build(),
@@ -584,7 +590,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::W,
+            name: PieceType::W,
             encoding: vec![
                 RowBuilder(2, 1).build(),
                 RowBuilder(1, 2).build(),
@@ -595,7 +601,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::W,
+            name: PieceType::W,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 2).build(),
@@ -607,7 +613,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // Z5, 4x
         Piece {
-            piece_type: PieceType::Z5,
+            name: PieceType::Z5,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -618,7 +624,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::Z5,
+            name: PieceType::Z5,
             encoding: vec![
                 RowBuilder(2, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -629,7 +635,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::Z5,
+            name: PieceType::Z5,
             encoding: vec![
                 RowBuilder(1, 2).build(),
                 RowBuilder(1, 1).build(),
@@ -640,7 +646,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::Z5,
+            name: PieceType::Z5,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 1).build(),
@@ -652,35 +658,35 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // Y, 8x
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![RowBuilder(0, 4).build(), RowBuilder(1, 1).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![RowBuilder(1, 1).build(), RowBuilder(0, 4).build()],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![RowBuilder(0, 4).build(), RowBuilder(2, 1).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![RowBuilder(2, 1).build(), RowBuilder(0, 4).build()],
             rotation: 3,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -692,7 +698,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 1).build(),
@@ -704,7 +710,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -716,7 +722,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::Y,
+            name: PieceType::Y,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -729,35 +735,35 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // L5, 8x
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![RowBuilder(0, 4).build(), RowBuilder(0, 1).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![RowBuilder(0, 1).build(), RowBuilder(0, 4).build()],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![RowBuilder(0, 4).build(), RowBuilder(3, 1).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![RowBuilder(3, 1).build(), RowBuilder(0, 4).build()],
             rotation: 3,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -769,7 +775,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 1).build(),
@@ -781,7 +787,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 1).build(),
@@ -793,7 +799,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::L5,
+            name: PieceType::L5,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 1).build(),
@@ -806,21 +812,21 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // U, 4x
         Piece {
-            piece_type: PieceType::U,
+            name: PieceType::U,
             encoding: vec![RowBuilder(0, 2).build_skip(1), RowBuilder(0, 3).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::U,
+            name: PieceType::U,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(0, 2).build_skip(1)],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::U,
+            name: PieceType::U,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(0, 1).build(),
@@ -831,7 +837,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::U,
+            name: PieceType::U,
             encoding: vec![
                 RowBuilder(0, 2).build(),
                 RowBuilder(1, 1).build(),
@@ -843,7 +849,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // T5, 4x
         Piece {
-            piece_type: PieceType::T5,
+            name: PieceType::T5,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 1).build(),
@@ -854,7 +860,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::T5,
+            name: PieceType::T5,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -865,7 +871,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::T5,
+            name: PieceType::T5,
             encoding: vec![
                 RowBuilder(0, 3).build(),
                 RowBuilder(1, 1).build(),
@@ -876,7 +882,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::T5,
+            name: PieceType::T5,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 3).build(),
@@ -888,7 +894,7 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // V5, 4x
         Piece {
-            piece_type: PieceType::V5,
+            name: PieceType::V5,
             encoding: vec![
                 RowBuilder(0, 3).build(),
                 RowBuilder(0, 1).build(),
@@ -899,7 +905,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::V5,
+            name: PieceType::V5,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -910,7 +916,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::V5,
+            name: PieceType::V5,
             encoding: vec![
                 RowBuilder(2, 1).build(),
                 RowBuilder(2, 1).build(),
@@ -921,7 +927,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 3,
         },
         Piece {
-            piece_type: PieceType::V5,
+            name: PieceType::V5,
             encoding: vec![
                 RowBuilder(0, 3).build(),
                 RowBuilder(2, 1).build(),
@@ -933,35 +939,35 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // N, 8x
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![RowBuilder(1, 3).build(), RowBuilder(0, 2).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![RowBuilder(0, 2).build(), RowBuilder(1, 3).build()],
             rotation: 1,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![RowBuilder(0, 3).build(), RowBuilder(2, 2).build()],
             rotation: 2,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![RowBuilder(2, 2).build(), RowBuilder(0, 3).build()],
             rotation: 3,
             max_row: BOARD_SIZE - 2,
             max_col: BOARD_SIZE - 4,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![
                 RowBuilder(0, 1).build(),
                 RowBuilder(0, 1).build(),
@@ -973,7 +979,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(1, 1).build(),
@@ -985,7 +991,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -997,7 +1003,7 @@ pub fn generate_pieces() -> Vec<Piece> {
             max_col: BOARD_SIZE - 2,
         },
         Piece {
-            piece_type: PieceType::N,
+            name: PieceType::N,
             encoding: vec![
                 RowBuilder(1, 1).build(),
                 RowBuilder(0, 2).build(),
@@ -1010,14 +1016,14 @@ pub fn generate_pieces() -> Vec<Piece> {
         },
         // I5, 2x
         Piece {
-            piece_type: PieceType::I5,
+            name: PieceType::I5,
             encoding: vec![RowBuilder(0, 5).build()],
             rotation: 0,
             max_row: BOARD_SIZE - 1,
             max_col: BOARD_SIZE - 5,
         },
         Piece {
-            piece_type: PieceType::I5,
+            name: PieceType::I5,
             encoding: vec![RowBuilder(0, 1).build(); 5],
             rotation: 1,
             max_row: BOARD_SIZE - 5,
