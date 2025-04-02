@@ -9,5 +9,5 @@ name = "blokus_rl"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.23.5"
+pyo3 = "0.24.1"
 pyo3-macros = "0.23.5"
