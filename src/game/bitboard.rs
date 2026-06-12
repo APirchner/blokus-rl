@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Write;
 use std::ops;
 
 pub const BOARD_SIZE: usize = 20;
@@ -242,7 +243,7 @@ impl fmt::Display for Bitboard {
             .collect::<Vec<String>>()
             .join(" | ");
         board.push_str(&header);
-        board.push_str(&format!(" |  s \n{}\n{:>2}", horizontal, 0));
+        let _ = write!(board, " |  s \n{}\n{:>2}", horizontal, 0);
 
         let mut line_break: usize = 20;
         for i in 0..MAX_IDX {
@@ -252,7 +253,7 @@ impl fmt::Display for Bitboard {
                 board.push_str("|  . ");
             }
             if i == line_break {
-                board.push_str(&format!("\n{}\n{:>2}", horizontal, i / BOARD_SIZE));
+                let _ = write!(board, "\n{}\n{:>2}", horizontal, i / BOARD_SIZE);
                 line_break += 21;
             }
         }
