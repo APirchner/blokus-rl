@@ -49,7 +49,7 @@ impl PyBlokus {
     pub fn rewards(&self) -> Vec<i16> {
         self.0
             .rewards()
-            .map_or_else(|| vec![0i16; self.0.num_agents], |x| x)
+            .unwrap_or_else(|| vec![0i16; self.0.num_agents])
     }
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {
