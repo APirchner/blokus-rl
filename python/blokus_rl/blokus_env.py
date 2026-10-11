@@ -90,6 +90,11 @@ class BlokusEnv(AECEnv):
         return self._infos
 
     @property
+    def action_grid_shape(self) -> tuple[int, int, int]:
+        """Shape (orientation, row, col) of the action grid, in C order."""
+        return (self._env.num_orientations, 20, 20)
+
+    @property
     def observation_spaces(self):
         return self._observation_spaces
 

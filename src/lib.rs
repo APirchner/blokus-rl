@@ -30,9 +30,15 @@ impl PyBlokus {
         self.0.agent_selection
     }
 
+    /// Size of the flattened (orientation, row, col) action grid.
     #[getter(num_actions)]
     pub fn num_actions(&self) -> usize {
-        self.0.action_set.actions.len()
+        self.0.action_set.grid_map.len()
+    }
+
+    #[getter(num_orientations)]
+    pub fn num_orientations(&self) -> usize {
+        self.0.action_set.grid_map.len() / (BOARD_SIZE * BOARD_SIZE)
     }
 
     #[getter(terminations)]
@@ -53,15 +59,21 @@ impl PyBlokus {
     }
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {
-        let obs = self.0.observe(action_idx);
+        let (observation, action_mask) = self.0.observe(action_idx);
+        let action_mask = action_mask.to_vec();
         PyObservation {
-            observation: obs.0,
-            action_mask: obs.1.to_vec(),
+            observation,
+            action_mask: self.0.action_set.grid_mask(&action_mask),
         }
     }
 
     pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
-        self.0.step(action_idx)?;
+        match self.0.action_set.grid_map.get(action_idx) {
+            Some(Some(idx)) => self.0.step(*idx)?,
+            // agents that are done pass their turn regardless of the action
+            _ if self.0.agents[self.0.agent_selection].done => self.0.step(0)?,
+            _ => return Err(InvalidAction::new("Action index not available".to_owned())),
+        }
         Ok(())
     }
 
@@ -111,7 +123,7 @@ mod _blokus {
 #[cfg(test)]
 mod tests {
     use crate::game::bitboard::{separating_bit_mask, Bitboard};
-    use crate::game::Game;
+    use crate::game::{Game, BOARD_SIZE};
 
     #[test]
     fn test_action_generation_valid() {
@@ -185,5 +197,63 @@ mod tests {
         assert_eq!(game.rewards().unwrap()[1], -86);
         assert_eq!(game.rewards().unwrap()[2], -87);
         assert_eq!(game.rewards().unwrap()[3], -87);
+    }
+
+    #[test]
+    fn test_grid_map_bijective() {
+        let game = Game::new();
+        let action_set = &game.action_set;
+        assert_eq!(action_set.grid_map.len(), 91 * BOARD_SIZE * BOARD_SIZE);
+        assert_eq!(
+            action_set.grid_map.iter().flatten().count(),
+            action_set.actions.len()
+        );
+        for (i, a) in action_set.actions.iter().enumerate() {
+            assert_eq!(action_set.grid_map[a.grid_idx], Some(i));
+        }
+    }
+
+    #[test]
+    fn test_grid_idx_is_translation() {
+        // the action at (orientation, row, col) is the one at (orientation, 0, 0) shifted by (row, col)
+        let game = Game::new();
+        let action_set = &game.action_set;
+        for a in &action_set.actions {
+            let orientation = a.grid_idx / (BOARD_SIZE * BOARD_SIZE);
+            let cell = a.grid_idx % (BOARD_SIZE * BOARD_SIZE);
+            let origin_idx = action_set.grid_map[orientation * BOARD_SIZE * BOARD_SIZE].unwrap();
+            let origin = action_set.actions[origin_idx];
+            assert_eq!(origin.piece_type, a.piece_type);
+            assert_eq!(
+                origin
+                    .bitboard
+                    .translate_origin(cell % BOARD_SIZE, cell / BOARD_SIZE),
+                a.bitboard
+            );
+        }
+    }
+
+    #[test]
+    fn test_grid_mask_matches_action_mask() {
+        let mut game = Game::new();
+        for turn in 0..40 {
+            let agent = game.agent_selection;
+            let mask = game.observe(agent).1.to_vec();
+            let grid = game.action_set.grid_mask(&mask);
+            assert_eq!(
+                grid.iter().filter(|x| **x).count(),
+                mask.iter().filter(|x| **x).count()
+            );
+            for (a, valid) in game.action_set.actions.iter().zip(&mask) {
+                assert_eq!(grid[a.grid_idx], *valid);
+            }
+            // vary the played actions without pulling in an RNG
+            let valid: Vec<usize> = (0..mask.len()).filter(|i| mask[*i]).collect();
+            let action = valid
+                .get(turn * 7 % valid.len().max(1))
+                .copied()
+                .unwrap_or(0);
+            game.step(action).unwrap();
+        }
     }
 }
