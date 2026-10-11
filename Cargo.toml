@@ -9,8 +9,8 @@ name = "blokus_rl"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.23.5"
-pyo3-macros = "0.23.5"
+pyo3 = "0.29.0"
+pyo3-macros = "0.29.0"
 
 [profile.release]
 # rustc's built-in debuginfo stripping yields dylibs that newer macOS dyld rejects
