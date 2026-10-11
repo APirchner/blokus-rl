@@ -25,13 +25,31 @@ from blokus_rl import BlokusEnv
 
 env = BlokusEnv(render_mode="human")
 env.reset()
-for i, agent in enumerate(env.agent_iter()):
+scores = {}
+for agent in env.agent_iter():
     observation, reward, termination, truncation, info = env.last()
-    action = env.action_space(agent).sample(mask=observation["action_mask"])
+    if termination or truncation:
+        # the agent is out of moves, its score is final and it leaves the game
+        scores[agent] = reward
+        action = None
+    else:
+        action = env.action_space(agent).sample(mask=observation["action_mask"])
     env.step(action)
-    if all([t[1] for t in env.terminations.items()]):
-        break
-print(env.rewards)
+print(scores)
+```
+
+Rewards are each agent's own Blokus score: minus the squares of its remaining pieces, +15 for placing all pieces, +20 if the monomino was placed last.
+An agent gets its score as soon as it is out of moves, since it can never get moves back. Competitive objectives such as win/loss or rank can be computed from the scores at the end of the episode.
+
+## Action space
+Every action places one of the 91 piece orientations (21 pieces in all their distinct rotations and flips) on the 20x20 board.
+Actions are laid out as a grid of shape `(orientation, row, col)` = `env.action_grid_shape` = `(91, 20, 20)` and flattened in C order into `Discrete(36400)`:
+`(row, col)` is the top-left corner of the piece's bounding box, in the frame of the acting agent.
+Positions where the piece would not fit on the board are always masked.
+
+```python
+action_mask = observation["action_mask"].reshape(env.action_grid_shape)
+orientation, row, col = np.unravel_index(action, env.action_grid_shape)
 ```
 
 ## Motivation

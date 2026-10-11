@@ -9,11 +9,16 @@ use self::agents::{Agent, Color};
 pub use self::bitboard::BOARD_SIZE;
 use self::bitboard::{Bitboard, MAX_IDX};
 use self::errors::InvalidAction;
+use self::pieces::PieceType;
 use std::fmt;
 use std::fmt::Write as _;
+use std::sync::OnceLock;
+
+/// The action set is identical for every game, so it is built once and shared across resets.
+static ACTION_SET: OnceLock<ActionSet> = OnceLock::new();
 
 pub struct Game {
-    pub action_set: ActionSet,
+    pub action_set: &'static ActionSet,
     pub agent_selection: usize,
     pub num_agents: usize,
     pub agents: [Agent; 4],
@@ -22,7 +27,7 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let action_set = ActionSet::new(&pieces::generate());
+        let action_set = ACTION_SET.get_or_init(|| ActionSet::new(&pieces::generate()));
         let agents = [
             Agent::new(Color::Blue, action_set.initial_actions()),
             Agent::new(Color::Yellow, action_set.initial_actions()),
@@ -46,17 +51,21 @@ impl Game {
         }
     }
 
+    /// Returns the boards aligned to the agent's frame and its action mask over the
+    /// flattened (orientation, row, col) action grid.
     pub fn observe(
         &mut self,
         agent_idx: usize,
-    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], &[bool]) {
+    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], Vec<u8>) {
         let boards = self.align_boards(agent_idx);
         if self.agents[agent_idx].turn > 0 && !self.agents[agent_idx].done {
+            let blocked = boards[0].dilate_ortho() | boards[1] | boards[2] | boards[3];
+            let diagonals = boards[0].dilate_diag();
             for (p, _) in self.agents[agent_idx].pieces.iter().filter(|p| *p.1) {
                 let piece_range = &self.action_set.piece_map[p];
                 for r in piece_range.clone() {
                     self.agents[agent_idx].action_mask[r] =
-                        check_action_valid(self.action_set.actions[r].bitboard, &boards);
+                        check_action_valid(self.action_set.actions[r].bitboard, blocked, diagonals);
                 }
             }
             self.agents[agent_idx].done = !self.agents[agent_idx].action_mask.iter().any(|x| *x);
@@ -70,7 +79,8 @@ impl Game {
                 boards[2].into_vecs(),
                 boards[3].into_vecs(),
             ],
-            &self.agents[agent_idx].action_mask,
+            self.action_set
+                .grid_mask(&self.agents[agent_idx].action_mask),
         )
     }
 
@@ -83,32 +93,32 @@ impl Game {
         ]
     }
 
-    pub fn rewards(&self) -> Option<Vec<i16>> {
-        let game_done = self.terminations().iter().all(|x| *x);
-        if !game_done {
-            return None;
-        }
-        let scores_raw: Vec<u8> = self
-            .agents
+    /// The score of every agent that is done, it is final since an agent never regains moves.
+    pub fn rewards(&self) -> Vec<Option<i16>> {
+        self.agents
             .iter()
-            .map(|x| {
-                x.pieces
+            .map(|a| {
+                if !a.done {
+                    return None;
+                }
+                let remaining = a
+                    .pieces
                     .iter()
                     .filter(|y| *y.1)
-                    .fold(0u8, |acc, p| acc + p.0.size())
+                    .fold(0u8, |acc, p| acc + p.0.size());
+                Some(match remaining {
+                    // +5 bonus if the monomino was placed last
+                    0 if a.last_piece == Some(PieceType::I1) => 20,
+                    0 => 15,
+                    x => -i16::from(x),
+                })
             })
-            .collect();
-        let scores = scores_raw
-            .iter()
-            .map(|x| match x {
-                0 => 15,
-                x => -i16::from(*x),
-            })
-            .collect();
-        Some(scores)
+            .collect()
     }
 
-    pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
+    /// Plays the action at `grid_idx` of the flattened (orientation, row, col) action grid.
+    /// Agents that are done pass their turn regardless of the action, e.g. with `None`.
+    pub fn step(&mut self, grid_idx: Option<usize>) -> Result<(), InvalidAction> {
         let agent = &self.agents[self.agent_selection];
         if !agent.done {
             if agent.action_mask_stale && agent.turn > 0 {
@@ -116,9 +126,10 @@ impl Game {
                     "Action mask is stale, call observe() first!".to_owned(),
                 ));
             }
-            if !agent.action_mask[action_idx] {
-                return Err(InvalidAction::new("Action index not available".to_owned()));
-            }
+            let action_idx = grid_idx
+                .and_then(|i| self.action_set.grid_map.get(i).copied().flatten())
+                .filter(|i| agent.action_mask[*i])
+                .ok_or_else(|| InvalidAction::new("Action index not available".to_owned()))?;
             let action = self.action_set[action_idx];
             self.execute_action(&action);
 
@@ -145,20 +156,15 @@ impl Game {
     }
 
     fn execute_action(&mut self, action: &Action) {
-        let aligned_boards = self.align_boards(self.agent_selection);
-        let selected_board = aligned_boards[0];
         let agent = &mut self.agents[self.agent_selection];
-        // execute action
-        agent.board = selected_board | action.bitboard;
+        // execute action, the agent's own board is already in its frame
+        agent.board |= action.bitboard;
         agent.turn += 1;
         agent.pieces.insert(action.piece_type, false);
+        agent.last_piece = Some(action.piece_type);
         // mask the played piece
-        let piece_range = &self.action_set.piece_map[&action.piece_type];
-        let piece_mask = vec![false; piece_range.end - piece_range.start];
-        let _u: Vec<bool> = agent
-            .action_mask
-            .splice(piece_range.start..piece_range.end, piece_mask)
-            .collect();
+        let piece_range = self.action_set.piece_map[&action.piece_type].clone();
+        agent.action_mask[piece_range].fill(false);
     }
 
     pub fn render(&self) {
@@ -180,11 +186,10 @@ fn cell_occupier(boards: &[Bitboard; 4], idx: usize) -> Option<Color> {
     }
 }
 
-fn check_action_valid(action_board: Bitboard, boards: &[Bitboard; 4]) -> bool {
-    let not_ortho = (action_board & boards[0].dilate_ortho()).is_empty();
-    let diag = !(action_board & boards[0].dilate_diag()).is_empty();
-    let not_neigbors = (action_board & (boards[1] | boards[2] | boards[3])).is_empty();
-    not_ortho & diag & not_neigbors
+/// An action is valid if it avoids the `blocked` cells (own pieces and their edges, other pieces)
+/// and touches the `diagonals` of the own pieces.
+fn check_action_valid(action_board: Bitboard, blocked: Bitboard, diagonals: Bitboard) -> bool {
+    (action_board & blocked).is_empty() && !(action_board & diagonals).is_empty()
 }
 
 impl fmt::Display for Game {
@@ -202,16 +207,18 @@ impl fmt::Display for Game {
 
         let mut line_break: usize = BOARD_SIZE;
         for i in 0..MAX_IDX {
+            // the separating bit ends the row instead of being drawn as a cell
+            if i == line_break {
+                let _ = write!(board, "|\n{}\n{:>2}", horizontal, i / BOARD_SIZE);
+                line_break += BOARD_SIZE + 1;
+                continue;
+            }
             match cell_occupier(&boards, i) {
                 Some(Color::Blue) => board.push_str("|  \x1b[44mx\x1b[0m "),
                 Some(Color::Yellow) => board.push_str("|  \x1b[43mx\x1b[0m "),
                 Some(Color::Red) => board.push_str("|  \x1b[41mx\x1b[0m "),
                 Some(Color::Green) => board.push_str("|  \x1b[42mx\x1b[0m "),
                 None => board.push_str("|  . "),
-            }
-            if i == line_break {
-                let _ = write!(board, "\n{}\n{:>2}", horizontal, i / BOARD_SIZE);
-                line_break += 21;
             }
         }
         write!(f, "{board}|")

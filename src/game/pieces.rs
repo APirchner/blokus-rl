@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::bitboard::{Bitboard, BOARD_SIZE};
+use super::bitboard::{BOARD_SIZE, Bitboard};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
 pub enum PieceType {
@@ -116,11 +116,14 @@ impl Piece {
         Bitboard(0, 0, 0, self.decode())
     }
 
-    pub fn build_translations(&self) -> Vec<Bitboard> {
-        let mut trans: Vec<Bitboard> = Vec::with_capacity(self.max_row * self.max_col);
+    /// Returns all translations as (cell index `row * BOARD_SIZE + col` of the bounding box origin, bitboard).
+    pub fn build_translations(&self) -> Vec<(usize, Bitboard)> {
+        let mut trans: Vec<(usize, Bitboard)> =
+            Vec::with_capacity((self.max_row + 1) * (self.max_col + 1));
+        let bitboard = self.to_bitboard();
         for i in 0..=self.max_row {
             for j in 0..=self.max_col {
-                trans.push(self.to_bitboard().translate_origin(j, i));
+                trans.push((i * BOARD_SIZE + j, bitboard.translate_origin(j, i)));
             }
         }
         trans
@@ -884,9 +887,9 @@ pub fn generate() -> Vec<Piece> {
         Piece {
             name: PieceType::T5,
             encoding: vec![
-                RowBuilder(1, 1).build(),
+                RowBuilder(2, 1).build(),
                 RowBuilder(0, 3).build(),
-                RowBuilder(1, 1).build(),
+                RowBuilder(2, 1).build(),
             ],
             rotation: 3,
             max_row: BOARD_SIZE - 3,
@@ -1005,10 +1008,10 @@ pub fn generate() -> Vec<Piece> {
         Piece {
             name: PieceType::N,
             encoding: vec![
-                RowBuilder(1, 1).build(),
+                RowBuilder(0, 1).build(),
                 RowBuilder(0, 2).build(),
-                RowBuilder(0, 1).build(),
-                RowBuilder(0, 1).build(),
+                RowBuilder(1, 1).build(),
+                RowBuilder(1, 1).build(),
             ],
             rotation: 7,
             max_row: BOARD_SIZE - 4,
@@ -1032,4 +1035,68 @@ pub fn generate() -> Vec<Piece> {
     ];
     pieces.sort();
     pieces
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    type Shape = BTreeSet<(usize, usize)>;
+
+    fn shape(piece: &Piece) -> Shape {
+        let cells = piece.to_bitboard().into_vecs();
+        (0..BOARD_SIZE)
+            .flat_map(|r| (0..BOARD_SIZE).map(move |c| (r, c)))
+            .filter(|&(r, c)| cells[r][c])
+            .collect()
+    }
+
+    /// Moves the shape's bounding box to the origin.
+    fn normalize(cells: Vec<(usize, usize)>) -> Shape {
+        let min_r = cells.iter().map(|c| c.0).min().unwrap();
+        let min_c = cells.iter().map(|c| c.1).min().unwrap();
+        cells
+            .into_iter()
+            .map(|(r, c)| (r - min_r, c - min_c))
+            .collect()
+    }
+
+    /// All rotations and reflections of the shape.
+    fn symmetries(shape: &Shape) -> BTreeSet<Shape> {
+        let mut out = BTreeSet::new();
+        let mut rotated = shape.clone();
+        for _ in 0..4 {
+            rotated = normalize(rotated.iter().map(|&(r, c)| (c, BOARD_SIZE - r)).collect());
+            out.insert(normalize(
+                rotated.iter().map(|&(r, c)| (r, BOARD_SIZE - c)).collect(),
+            ));
+            out.insert(rotated.clone());
+        }
+        out
+    }
+
+    #[test]
+    fn test_orientations_are_the_piece_symmetries() {
+        let pieces = generate();
+        for piece_type in PieceType::iter() {
+            let shapes: Vec<Shape> = pieces
+                .iter()
+                .filter(|p| p.name == piece_type)
+                .map(shape)
+                .collect();
+            assert_eq!(shapes[0].len(), usize::from(piece_type.size()));
+            let distinct: BTreeSet<Shape> = shapes.iter().cloned().collect();
+            assert_eq!(
+                distinct.len(),
+                shapes.len(),
+                "{piece_type:?} repeats an orientation"
+            );
+            assert_eq!(
+                distinct,
+                symmetries(&shapes[0]),
+                "{piece_type:?} has a wrong orientation"
+            );
+        }
+    }
 }
