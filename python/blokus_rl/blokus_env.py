@@ -92,7 +92,7 @@ class BlokusEnv(AECEnv):
     @property
     def action_grid_shape(self) -> tuple[int, int, int]:
         """Shape (orientation, row, col) of the action grid, in C order."""
-        return (self._env.num_orientations, 20, 20)
+        return self._env.action_grid_shape
 
     @property
     def observation_spaces(self):
@@ -133,7 +133,7 @@ class BlokusEnv(AECEnv):
         self.observe.cache_clear()
         self._render_setup()
 
-    def step(self, action: int) -> None:
+    def step(self, action: int | None) -> None:
         self.observe.cache_clear()
         self._env.step(action)
         self.observe(self.agent_selection)

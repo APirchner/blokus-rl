@@ -36,9 +36,14 @@ impl PyBlokus {
         self.0.action_set.grid_map.len()
     }
 
-    #[getter(num_orientations)]
-    pub fn num_orientations(&self) -> usize {
-        self.0.action_set.grid_map.len() / (BOARD_SIZE * BOARD_SIZE)
+    /// Shape (orientation, row, col) of the action grid, in C order.
+    #[getter(action_grid_shape)]
+    pub fn action_grid_shape(&self) -> (usize, usize, usize) {
+        (
+            self.0.action_set.grid_map.len() / (BOARD_SIZE * BOARD_SIZE),
+            BOARD_SIZE,
+            BOARD_SIZE,
+        )
     }
 
     #[getter(terminations)]
@@ -60,21 +65,14 @@ impl PyBlokus {
 
     pub fn observe(&mut self, action_idx: usize) -> PyObservation {
         let (observation, action_mask) = self.0.observe(action_idx);
-        let action_mask = action_mask.to_vec();
         PyObservation {
             observation,
-            action_mask: self.0.action_set.grid_mask(&action_mask),
+            action_mask,
         }
     }
 
-    pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
-        match self.0.action_set.grid_map.get(action_idx) {
-            Some(Some(idx)) => self.0.step(*idx)?,
-            // agents that are done pass their turn regardless of the action
-            _ if self.0.agents[self.0.agent_selection].done => self.0.step(0)?,
-            _ => return Err(InvalidAction::new("Action index not available".to_owned())),
-        }
-        Ok(())
+    pub fn step(&mut self, action_idx: Option<usize>) -> Result<(), InvalidAction> {
+        self.0.step(action_idx)
     }
 
     pub fn render(&self) {
@@ -129,7 +127,7 @@ mod tests {
     fn test_action_generation_valid() {
         let game = Game::new();
         assert_eq!(game.action_set.actions.len(), 30433);
-        for a in game.action_set.actions {
+        for a in &game.action_set.actions {
             assert!(
                 (a.bitboard & !separating_bit_mask()) == Bitboard::default(),
                 "Invalid action!"
@@ -139,7 +137,7 @@ mod tests {
     #[test]
     fn test_rotation_clock_valid() {
         let game = Game::new();
-        for a in game.action_set.actions {
+        for a in &game.action_set.actions {
             let board_rot = a
                 .bitboard
                 .rotate_clock()
@@ -152,7 +150,7 @@ mod tests {
     #[test]
     fn test_rotation_anticlock_valid() {
         let game = Game::new();
-        for a in game.action_set.actions {
+        for a in &game.action_set.actions {
             let board_rot = a
                 .bitboard
                 .rotate_anticlock()
@@ -165,28 +163,32 @@ mod tests {
     #[test]
     fn test_agent_selection() {
         let mut game = Game::new();
+        let a400 = Some(game.action_set[400].grid_idx);
+        let a0 = Some(game.action_set[0].grid_idx);
         assert_eq!(game.agent_selection, 0);
-        let _ = game.step(400);
+        let _ = game.step(a400);
         assert_eq!(game.agent_selection, 1);
-        let _ = game.step(400);
+        let _ = game.step(a400);
         assert_eq!(game.agent_selection, 2);
-        let _ = game.step(400);
+        let _ = game.step(a400);
         assert_eq!(game.agent_selection, 3);
-        let _ = game.step(0);
+        let _ = game.step(a0);
         assert_eq!(game.agent_selection, 0);
     }
 
     #[test]
     fn test_scoring() {
         let mut game = Game::new();
-        game.step(400).unwrap();
-        game.step(400).unwrap();
-        game.step(400).unwrap();
-        game.step(400).unwrap();
+        let a400 = Some(game.action_set[400].grid_idx);
+        let a22 = Some(game.action_set[22].grid_idx);
+        game.step(a400).unwrap();
+        game.step(a400).unwrap();
+        game.step(a400).unwrap();
+        game.step(a400).unwrap();
         game.observe(0);
-        game.step(22).unwrap();
+        game.step(a22).unwrap();
         game.observe(1);
-        game.step(22).unwrap();
+        game.step(a22).unwrap();
         game.observe(2);
         assert!(game.rewards().is_none());
         game.agents[0].done = true;
@@ -238,22 +240,53 @@ mod tests {
         let mut game = Game::new();
         for turn in 0..40 {
             let agent = game.agent_selection;
-            let mask = game.observe(agent).1.to_vec();
-            let grid = game.action_set.grid_mask(&mask);
+            let grid = game.observe(agent).1;
+            let mask = &game.agents[agent].action_mask;
             assert_eq!(
                 grid.iter().filter(|x| **x).count(),
                 mask.iter().filter(|x| **x).count()
             );
-            for (a, valid) in game.action_set.actions.iter().zip(&mask) {
+            for (a, valid) in game.action_set.actions.iter().zip(mask) {
                 assert_eq!(grid[a.grid_idx], *valid);
             }
-            // vary the played actions without pulling in an RNG
-            let valid: Vec<usize> = (0..mask.len()).filter(|i| mask[*i]).collect();
-            let action = valid
-                .get(turn * 7 % valid.len().max(1))
-                .copied()
-                .unwrap_or(0);
+            // vary the played actions without pulling in an RNG, agents without actions pass
+            let valid: Vec<usize> = (0..grid.len()).filter(|i| grid[*i]).collect();
+            let action = valid.get(turn * 7 % valid.len().max(1)).copied();
             game.step(action).unwrap();
         }
+    }
+
+    #[test]
+    fn test_step_rejects_unavailable_grid_idx() {
+        let mut game = Game::new();
+        let unmapped = game.action_set.grid_map.iter().position(Option::is_none);
+        let out_of_range = Some(game.action_set.grid_map.len());
+        let grid = game.observe(0).1;
+        let masked = (0..grid.len()).find(|i| game.action_set.grid_map[*i].is_some() && !grid[*i]);
+        for action in [unmapped, out_of_range, masked, None] {
+            assert!(game.step(action).is_err());
+            assert_eq!(game.agent_selection, 0);
+        }
+        let valid = (0..grid.len()).find(|i| grid[*i]).unwrap();
+        game.step(Some(valid)).unwrap();
+        assert_eq!(game.agent_selection, 1);
+        let action = game.action_set[game.action_set.grid_map[valid].unwrap()];
+        assert_eq!(game.agents[0].board, action.bitboard);
+    }
+
+    #[test]
+    fn test_done_agent_passes_any_action() {
+        let mut game = Game::new();
+        let unmapped = game.action_set.grid_map.iter().position(Option::is_none);
+        game.agents[0].done = true;
+        game.step(None).unwrap();
+        assert_eq!(game.agent_selection, 1);
+        let a400 = Some(game.action_set[400].grid_idx);
+        for _ in 0..3 {
+            game.step(a400).unwrap();
+        }
+        game.step(unmapped).unwrap();
+        assert_eq!(game.agent_selection, 1);
+        assert_eq!(game.agents[0].board, Bitboard::default());
     }
 }

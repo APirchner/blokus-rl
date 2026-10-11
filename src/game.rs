@@ -11,9 +11,13 @@ use self::bitboard::{Bitboard, MAX_IDX};
 use self::errors::InvalidAction;
 use std::fmt;
 use std::fmt::Write as _;
+use std::sync::OnceLock;
+
+/// The action set is identical for every game, so it is built once and shared across resets.
+static ACTION_SET: OnceLock<ActionSet> = OnceLock::new();
 
 pub struct Game {
-    pub action_set: ActionSet,
+    pub action_set: &'static ActionSet,
     pub agent_selection: usize,
     pub num_agents: usize,
     pub agents: [Agent; 4],
@@ -22,7 +26,7 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let action_set = ActionSet::new(&pieces::generate());
+        let action_set = ACTION_SET.get_or_init(|| ActionSet::new(&pieces::generate()));
         let agents = [
             Agent::new(Color::Blue, action_set.initial_actions()),
             Agent::new(Color::Yellow, action_set.initial_actions()),
@@ -46,10 +50,12 @@ impl Game {
         }
     }
 
+    /// Returns the boards aligned to the agent's frame and its action mask over the
+    /// flattened (orientation, row, col) action grid.
     pub fn observe(
         &mut self,
         agent_idx: usize,
-    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], &[bool]) {
+    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], Vec<bool>) {
         let boards = self.align_boards(agent_idx);
         if self.agents[agent_idx].turn > 0 && !self.agents[agent_idx].done {
             for (p, _) in self.agents[agent_idx].pieces.iter().filter(|p| *p.1) {
@@ -70,7 +76,8 @@ impl Game {
                 boards[2].into_vecs(),
                 boards[3].into_vecs(),
             ],
-            &self.agents[agent_idx].action_mask,
+            self.action_set
+                .grid_mask(&self.agents[agent_idx].action_mask),
         )
     }
 
@@ -108,7 +115,9 @@ impl Game {
         Some(scores)
     }
 
-    pub fn step(&mut self, action_idx: usize) -> Result<(), InvalidAction> {
+    /// Plays the action at `grid_idx` of the flattened (orientation, row, col) action grid.
+    /// Agents that are done pass their turn regardless of the action, e.g. with `None`.
+    pub fn step(&mut self, grid_idx: Option<usize>) -> Result<(), InvalidAction> {
         let agent = &self.agents[self.agent_selection];
         if !agent.done {
             if agent.action_mask_stale && agent.turn > 0 {
@@ -116,9 +125,10 @@ impl Game {
                     "Action mask is stale, call observe() first!".to_owned(),
                 ));
             }
-            if !agent.action_mask[action_idx] {
-                return Err(InvalidAction::new("Action index not available".to_owned()));
-            }
+            let action_idx = grid_idx
+                .and_then(|i| self.action_set.grid_map.get(i).copied().flatten())
+                .filter(|i| agent.action_mask[*i])
+                .ok_or_else(|| InvalidAction::new("Action index not available".to_owned()))?;
             let action = self.action_set[action_idx];
             self.execute_action(&action);
 
