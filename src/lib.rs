@@ -60,7 +60,7 @@ mod tests {
             let action =
                 (!legal.is_empty()).then(|| game.action_set[legal[rng.below(legal.len())]]);
             if let Some(a) = action {
-                placed[agent] |= 1 << a.piece_type.index();
+                placed[agent] |= a.piece_type.bit();
             }
             game.step(action.map(|a| a.grid_idx)).unwrap();
         }
@@ -187,7 +187,7 @@ mod tests {
                 .map(|i| game.action_set[i])
                 .find(|a| a.piece_type.size() == last_size)
                 .unwrap();
-            game.agents[agent].pieces = 1 << action.piece_type.index();
+            game.agents[agent].pieces = action.piece_type.bit();
             game.step(Some(action.grid_idx)).unwrap();
             assert!(game.agents[agent].done);
         }
@@ -398,9 +398,16 @@ mod tests {
         });
         let bytes = Game::new().to_bytes();
         assert!(Game::from_bytes(&bytes[1..]).is_none());
-        for (idx, value) in [(68, 4), (66, 0x3f), (15, 0x80), (bytes.len() - 1, 4)] {
+        for (idx, value) in [
+            (0, bytes[0] + 1),
+            (69, 4),
+            (67, 0x3f),
+            (16, 0x80),
+            (bytes.len() - 1, 4),
+        ] {
             let mut invalid = bytes.clone();
-            // an unknown last piece, a 22nd piece, a cell off the board, a 5th agent
+            // another format version, an unknown last piece, a 22nd piece, a cell off the board,
+            // a 5th agent
             invalid[idx] = value;
             assert!(Game::from_bytes(&invalid).is_none());
         }
@@ -494,9 +501,9 @@ mod tests {
     fn test_hash_of_monomino_bonus() {
         // agent 0 placed all pieces, with the monomino or another piece last
         let mut bytes = Game::new().to_bytes();
-        bytes[64..68].fill(0);
+        bytes[65..69].fill(0);
         let hashes = [PieceType::I1, PieceType::X].map(|last| {
-            bytes[68] = last as u8;
+            bytes[69] = last as u8;
             Game::from_bytes(&bytes).unwrap().hash()
         });
         assert_ne!(hashes[0], hashes[1]);

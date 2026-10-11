@@ -58,11 +58,24 @@ impl PieceType {
         self as u8 % 6
     }
 
-    /// Position in `PieceType::ALL`, which is sorted by discriminant.
+    /// Position in `PieceType::ALL`.
     pub(crate) fn index(self) -> usize {
-        Self::ALL
-            .binary_search_by_key(&(self as u8), |p| *p as u8)
-            .unwrap()
+        // the positions by discriminant, filled from `ALL` at compile time
+        const INDEX: [usize; PieceType::I5 as usize + 1] = {
+            let mut index = [0; PieceType::I5 as usize + 1];
+            let mut i = 0;
+            while i < PieceType::ALL.len() {
+                index[PieceType::ALL[i] as usize] = i;
+                i += 1;
+            }
+            index
+        };
+        INDEX[self as usize]
+    }
+
+    /// The piece's bit in a set of pieces, bit `i` for `PieceType::ALL[i]`.
+    pub(crate) fn bit(self) -> u32 {
+        1 << self.index()
     }
 
     pub fn iter() -> impl Iterator<Item = PieceType> {
@@ -1106,6 +1119,14 @@ mod tests {
                 symmetries(&shapes[0]),
                 "{piece_type:?} has a wrong orientation"
             );
+        }
+    }
+
+    #[test]
+    fn test_index_is_position_in_all() {
+        for (i, piece_type) in PieceType::iter().enumerate() {
+            assert_eq!(piece_type.index(), i);
+            assert_eq!(piece_type.bit(), 1 << i);
         }
     }
 }

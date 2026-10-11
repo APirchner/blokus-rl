@@ -36,6 +36,11 @@ pub(crate) const START_CELLS: [Bitboard; 4] = [
 /// Bytes per agent written by `Game::to_bytes`: its board, pieces and last piece.
 const AGENT_BYTES: usize = 64 + 4 + 1;
 
+/// Version of the format written by `Game::to_bytes`, its first byte. It changes whenever the
+/// meaning of the bytes does, e.g. the order of `PieceType::ALL` or the frame of the boards, so
+/// that `Game::from_bytes` rejects states of another version.
+const BYTES_VERSION: u8 = 1;
+
 /// Length of the `planes` written by `Game::encode`: the occupied cells, corners and blocked
 /// cells of each agent, see `Observation`, as (plane, row, col) bytes of 0/1.
 pub const PLANES_LEN: usize = 3 * 4 * BOARD_SIZE * BOARD_SIZE;
@@ -190,12 +195,12 @@ impl Game {
         let order = AGENT_ORDER[agent_idx];
         let boards = order.map(|c| into_frame(self.agents[c as usize].board, agent_idx));
         let occupied = boards[0] | boards[1] | boards[2] | boards[3];
-        let blocked = boards.map(|own| own.dilate_ortho() | occupied);
-        let corners = std::array::from_fn(|k| corners(boards[k], blocked[k], START_CELLS[k]));
+        let masks: [_; 4] =
+            std::array::from_fn(|k| blocked_and_corners(boards[k], occupied, START_CELLS[k]));
         Observation {
             boards,
-            corners,
-            blocked,
+            corners: masks.map(|(_, corners)| corners),
+            blocked: masks.map(|(blocked, _)| blocked),
             pieces: order.map(|c| self.agents[c as usize].pieces),
             done: order.map(|c| self.agents[c as usize].done),
         }
@@ -217,9 +222,8 @@ impl Game {
     pub fn scores(&self) -> [i16; 4] {
         self.agents.map(|a| {
             let remaining = PieceType::iter()
-                .enumerate()
-                .filter(|(i, _)| a.pieces & (1 << i) != 0)
-                .fold(0u8, |acc, (_, p)| acc + p.size());
+                .filter(|p| a.pieces & p.bit() != 0)
+                .fold(0u8, |acc, p| acc + p.size());
             match remaining {
                 // +5 bonus if the monomino was placed last
                 0 if a.last_piece == Some(PieceType::I1) => 20,
@@ -280,12 +284,13 @@ impl Game {
         Ok(())
     }
 
-    /// The state as bytes: per agent its board in the frame of agent 0, its pieces and its last
-    /// piece, then the selected agent.
+    /// The state as bytes: the format version, per agent its board in the frame of agent 0, its
+    /// pieces and its last piece, then the selected agent.
     #[allow(clippy::cast_possible_truncation)]
     #[must_use]
     pub fn to_bytes(self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(4 * AGENT_BYTES + 1);
+        let mut bytes = Vec::with_capacity(4 * AGENT_BYTES + 2);
+        bytes.push(BYTES_VERSION);
         for a in &self.agents {
             for word in [a.board.0, a.board.1, a.board.2, a.board.3] {
                 bytes.extend(word.to_le_bytes());
@@ -298,12 +303,14 @@ impl Game {
         bytes
     }
 
-    /// The state written by `to_bytes`, None if `bytes` is not one. It does not check that the
-    /// position can be reached in a game.
+    /// The state written by `to_bytes`, None if `bytes` is not one or of another format version.
+    /// It does not check that the position can be reached in a game.
     #[allow(clippy::cast_possible_truncation)]
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let (agent_selection, agents) = bytes.split_last()?;
+        let [BYTES_VERSION, agents @ .., agent_selection] = bytes else {
+            return None;
+        };
         if agents.len() != 4 * AGENT_BYTES || *agent_selection >= 4 {
             return None;
         }
@@ -385,17 +392,18 @@ impl Game {
     pub(crate) fn is_legal(&self, agent: usize, action: usize) -> bool {
         let action = self.action_set[usize::from(self.action_set.rotated[agent][action])];
         let (blocked, corners) = self.placement_masks(agent);
-        self.agents[agent].pieces & (1 << action.piece_type.index()) != 0
+        self.agents[agent].pieces & action.piece_type.bit() != 0
             && check_action_valid(action.bitboard, blocked, corners)
     }
 
     /// The cells the agent can not fill and the corners its next piece must cover, in the frame of
     /// agent 0.
     fn placement_masks(&self, agent: usize) -> (Bitboard, Bitboard) {
-        let own = self.agents[agent].board;
-        let occupied = self.agents.iter().fold(own, |acc, a| acc | a.board);
-        let blocked = own.dilate_ortho() | occupied;
-        (blocked, corners(own, blocked, START_CELLS[agent]))
+        let occupied = self
+            .agents
+            .iter()
+            .fold(Bitboard::default(), |acc, a| acc | a.board);
+        blocked_and_corners(self.agents[agent].board, occupied, START_CELLS[agent])
     }
 
     /// Calls `visit` with every placement of the `pieces` that avoids the `blocked` cells and covers
@@ -429,7 +437,7 @@ impl Game {
         let a = &mut self.agents[agent];
         a.board |= action.bitboard;
         a.turn += 1;
-        a.pieces &= !(1 << action.piece_type.index());
+        a.pieces &= !action.piece_type.bit();
         a.last_piece = Some(action.piece_type);
         self.zobrist ^= cells_key(agent, action.bitboard);
         self.update_done();
@@ -527,15 +535,17 @@ fn check_action_valid(action_board: Bitboard, blocked: Bitboard, corners: Bitboa
     (action_board & blocked).is_empty() && !(action_board & corners).is_empty()
 }
 
-/// The free cells an agent's next piece can attach to, given its `own` cells, the cells it can not
-/// fill and its `start` cell.
-fn corners(own: Bitboard, blocked: Bitboard, start: Bitboard) -> Bitboard {
+/// The cells an agent can not fill and the free cells its next piece can attach to, see
+/// `Observation`, given its `own` cells, all `occupied` cells and its `start` cell. It is the
+/// placement rule of both the observation and the legal moves.
+fn blocked_and_corners(own: Bitboard, occupied: Bitboard, start: Bitboard) -> (Bitboard, Bitboard) {
+    let blocked = own.dilate_ortho() | occupied;
     let attach = if own.is_empty() {
         start
     } else {
         own.dilate_diag()
     };
-    attach & !blocked
+    (blocked, attach & !blocked)
 }
 
 /// The final rewards for the final `scores`, see `RewardMode`.
@@ -611,7 +621,7 @@ impl Game {
         (0..self.action_set.actions.len())
             .filter(move |a| {
                 let action = self.action_set[*a];
-                obs.pieces[0] & (1 << action.piece_type.index()) != 0
+                obs.pieces[0] & action.piece_type.bit() != 0
                     && check_action_valid(action.bitboard, obs.blocked[0], obs.corners[0])
             })
             .map(|a| u16::try_from(a).unwrap())

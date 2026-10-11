@@ -8,7 +8,15 @@ use crate::game::bitboard::Bitboard;
 use crate::game::errors::InvalidAction;
 use crate::game::{ACTION_GRID_SHAPE, BOARD_SIZE, Game, PieceType, RewardMode, write_planes};
 
-#[pyclass]
+/// The reward modes of `PyBlokus.outcome`, by name.
+const REWARD_MODES: [(&str, RewardMode); 3] = [
+    ("score", RewardMode::Score),
+    ("win_share", RewardMode::WinShare),
+    ("rank", RewardMode::Rank),
+];
+
+// pickle finds the class through its module
+#[pyclass(module = "blokus_rl._blokus")]
 struct PyBlokus(Game);
 
 #[pymethods]
@@ -27,6 +35,24 @@ impl PyBlokus {
         Self(self.0)
     }
 
+    pub fn __copy__(&self) -> Self {
+        self.copy()
+    }
+
+    pub fn __deepcopy__(&self, _memo: &Bound<'_, PyAny>) -> Self {
+        self.copy()
+    }
+
+    /// Pickles the game as its `to_bytes` state.
+    pub fn __getstate__<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        self.to_bytes(py)
+    }
+
+    pub fn __setstate__(&mut self, state: &[u8]) -> PyResult<()> {
+        *self = Self::from_bytes(state)?;
+        Ok(())
+    }
+
     /// The game state as bytes, restore it with `from_bytes`.
     pub fn to_bytes<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.0.to_bytes())
@@ -34,9 +60,9 @@ impl PyBlokus {
 
     #[staticmethod]
     pub fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        Game::from_bytes(data)
-            .map(Self)
-            .ok_or_else(|| PyValueError::new_err("Not a game state written by to_bytes()"))
+        Game::from_bytes(data).map(Self).ok_or_else(|| {
+            PyValueError::new_err("Not a game state written by to_bytes() of this version")
+        })
     }
 
     #[getter(agents)]
@@ -60,6 +86,12 @@ impl PyBlokus {
     #[classattr]
     pub fn action_grid_shape() -> (usize, usize, usize) {
         ACTION_GRID_SHAPE
+    }
+
+    /// The reward modes of `outcome`.
+    #[classattr]
+    pub fn reward_modes(py: Python<'_>) -> PyResult<Bound<'_, PyTuple>> {
+        PyTuple::new(py, REWARD_MODES.map(|(name, _)| name))
     }
 
     /// The piece names, in the order of the observation's piece axis.
@@ -96,19 +128,19 @@ impl PyBlokus {
         self.0.ply()
     }
 
-    /// The final rewards in `mode` (`"score"`, `"win_share"` or `"rank"`), None until the game is
-    /// over.
+    /// The final rewards in `mode`, one of `reward_modes`, None until the game is over.
     pub fn outcome(&self, mode: &str) -> PyResult<Option<[f32; 4]>> {
-        let mode = match mode {
-            "score" => RewardMode::Score,
-            "win_share" => RewardMode::WinShare,
-            "rank" => RewardMode::Rank,
-            _ => return Err(PyValueError::new_err(format!("Unknown reward mode {mode}"))),
-        };
+        let (_, mode) = REWARD_MODES
+            .into_iter()
+            .find(|(name, _)| *name == mode)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown reward mode {mode}")))?;
         Ok(self.0.outcome(mode))
     }
 
-    pub fn observe(&self, agent_idx: usize) -> PyObservation {
+    pub fn observe(&self, agent_idx: usize) -> PyResult<PyObservation> {
+        if agent_idx >= self.0.num_agents {
+            return Err(PyValueError::new_err(format!("Unknown agent {agent_idx}")));
+        }
         let obs = self.0.observe(agent_idx);
         let mut moves = Vec::new();
         self.0.observed_moves(&obs, &mut moves);
@@ -116,7 +148,7 @@ impl PyBlokus {
             .pieces
             .iter()
             .flat_map(|p| (0..PieceType::ALL.len()).map(move |i| u8::from(p & (1 << i) != 0)));
-        PyObservation {
+        Ok(PyObservation {
             observation: planes(&obs.boards),
             corners: planes(&obs.corners),
             blocked: planes(&obs.blocked),
@@ -126,7 +158,7 @@ impl PyBlokus {
                 .0
                 .action_set
                 .grid_mask(moves.iter().map(|a| usize::from(*a))),
-        }
+        })
     }
 
     pub fn step(&mut self, action_idx: Option<usize>) -> Result<(), InvalidAction> {

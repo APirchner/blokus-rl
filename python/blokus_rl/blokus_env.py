@@ -7,7 +7,7 @@ import pygame
 
 from blokus_rl._blokus import PyBlokus
 
-REWARD_MODES = ("score", "win_share", "rank")
+REWARD_MODES = PyBlokus.reward_modes
 
 
 def _bool_array(data: bytes, shape: tuple[int, ...]) -> np.ndarray:
@@ -228,19 +228,25 @@ class BlokusEnv(AECEnv):
             }
         return dict(self._observations[agent])
 
+    def __getstate__(self) -> dict:
+        # observations are recomputed; a copy does not render, e.g. when it
+        # branches off a tree search
+        state = self.__dict__.copy()
+        state.update(
+            _observations={}, _render_mode=None, _screen=None, _clock=None
+        )
+        return state
+
+    def __copy__(self) -> "BlokusEnv":
+        # a shallow copy would step the same game
+        return copy.deepcopy(self)
+
     def __deepcopy__(self, memo: dict) -> "BlokusEnv":
         clone = type(self).__new__(type(self))
         memo[id(self)] = clone
-        # the game is copied in Rust and observations are recomputed; a copy
-        # does not render, e.g. when it branches off a tree search
-        skip = ("_env", "_observations", "_screen", "_clock")
-        state = {k: v for k, v in self.__dict__.items() if k not in skip}
-        clone.__dict__.update(copy.deepcopy(state, memo))
-        clone._env = self._env.copy()
-        clone._observations = {}
-        clone._render_mode = None
-        clone._screen = None
-        clone._clock = None
+        # the observation spaces never change, so the copy shares them
+        memo[id(self._observation_spaces)] = self._observation_spaces
+        clone.__dict__.update(copy.deepcopy(self.__getstate__(), memo))
         return clone
 
     def render(self) -> np.ndarray | None:

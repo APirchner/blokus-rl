@@ -79,8 +79,9 @@ orientation, row, col = np.unravel_index(action, env.action_grid_shape)
 
 ## Copying and saving states
 `copy.deepcopy(env)` copies an environment, e.g. to branch off a tree search; the copy plays on independently and does not render.
+`copy.copy(env)` does the same, and environments can be pickled, e.g. for vectorized environments in subprocesses.
 `env._env.copy()` copies only the game, which is much cheaper.
-The game state can also be saved as bytes and restored:
+The game state can also be saved as bytes and restored; the bytes start with a format version, and `from_bytes` rejects states of another version:
 
 ```python
 from blokus_rl._blokus import PyBlokus

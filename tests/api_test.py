@@ -1,4 +1,5 @@
 import copy
+import pickle
 from functools import partial
 
 import numpy as np
@@ -79,7 +80,14 @@ def competitive_game_test(seed: int, reward_mode: str) -> None:
         assert abs(sum(returns.values()) - 1) < 1e-6
 
 
-def deepcopy_test(seed: int) -> None:
+def pickle_copy(obj):
+    return pickle.loads(pickle.dumps(obj))
+
+
+COPIES = (copy.copy, copy.deepcopy, pickle_copy)
+
+
+def copy_test(seed: int, copy_env) -> None:
     # a copy plays on independently, with the original's action sampling
     env = BlokusEnv(seed=seed)
     env.reset(seed=seed)
@@ -88,7 +96,7 @@ def deepcopy_test(seed: int) -> None:
         env.step(env.action_space(agent).sample(obs["action_mask"]))
     state = env._env.to_bytes()
     mask = env.observe(env.agent_selection)["action_mask"].copy()
-    clone = copy.deepcopy(env)
+    clone = copy_env(env)
     histories = []
     for e in (clone, env):
         history = []
@@ -110,6 +118,20 @@ def deepcopy_test(seed: int) -> None:
     assert histories[0] == histories[1]
 
 
+def game_copy_test() -> None:
+    # copies of the game play on independently
+    game = PyBlokus()
+    state = game.to_bytes()
+    for clone in [game.copy()] + [copy_game(game) for copy_game in COPIES]:
+        assert clone.to_bytes() == state
+        clone.step(clone.observe(0).action_mask.index(1))
+        assert clone.to_bytes() != state
+        assert game.to_bytes() == state
+    # the observation spaces never change, so copies share them
+    env = BlokusEnv()
+    assert copy.deepcopy(env).observation_spaces is env.observation_spaces
+
+
 def bytes_test() -> None:
     env = BlokusEnv(seed=0)
     env.reset(seed=0)
@@ -123,12 +145,25 @@ def bytes_test() -> None:
         assert (
             restored.observe(i).action_mask == env._env.observe(i).action_mask
         )
-    try:
-        PyBlokus.from_bytes(state[:-1])
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("from_bytes() accepted a truncated state")
+    # a truncated state, a state of another format version
+    for invalid in (state[:-1], bytes([state[0] + 1]) + state[1:]):
+        try:
+            PyBlokus.from_bytes(invalid)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("from_bytes() accepted an invalid state")
+
+
+def invalid_arguments_test() -> None:
+    game = PyBlokus()
+    for call in (partial(game.observe, 4), partial(game.outcome, "wins")):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{call} accepted an invalid argument")
 
 
 if __name__ == "__main__":
@@ -141,7 +176,10 @@ if __name__ == "__main__":
         full_game_test(seed)
         for mode in REWARD_MODES[1:]:
             competitive_game_test(seed, mode)
-        deepcopy_test(seed)
+        for copy_env in COPIES:
+            copy_test(seed, copy_env)
         observation_test(seed)
+    game_copy_test()
     bytes_test()
+    invalid_arguments_test()
     print("All tests passed")
