@@ -89,6 +89,40 @@ state = env._env.to_bytes()
 game = PyBlokus.from_bytes(state)
 ```
 
+## Rust library
+Search code, such as a tree search for self-play, can use the game directly from Rust without Python:
+
+```toml
+[dependencies]
+blokus-rl = { git = "https://github.com/APirchner/blokus-rl", default-features = false }
+```
+
+```rust
+use blokus_rl::game::{ACTION_GRID_SHAPE, ActionSet, GLOBALS_LEN, Game, PLANES_LEN, RewardMode};
+
+let mut game = Game::new();
+let mut moves = Vec::new();
+let (mut planes, mut globals) = (vec![0; PLANES_LEN], vec![0.0; GLOBALS_LEN]);
+while !game.is_over() {
+    // the observation of the agent to move, as in Python
+    game.encode(&mut planes, &mut globals);
+    game.legal_moves(&mut moves);
+    // an action's index in the policy grid of shape ACTION_GRID_SHAPE = (91, 20, 20)
+    let policy_idx = ActionSet::grid_idx(moves[0]);
+    let mut branch = game; // a copy is a few hundred bytes
+    branch.apply(moves[0]);
+    game.apply(moves[0]);
+    assert_eq!(branch.hash(), game.hash());
+}
+println!("{:?}", game.outcome(RewardMode::WinShare));
+```
+
+Actions are indices into the action set, in the frame of the agent that plays them.
+`Game::hash` is a Zobrist hash of the position, e.g. to cache network evaluations.
+`blokus_rl::game::pentobi` converts actions to and from the moves of the [Pentobi](https://pentobi.sourceforge.io/) engine, and `Game::from_moves` replays Pentobi games.
+
+Benchmarks over positions from random games run with `cargo bench`.
+
 ## Motivation
 I'm not a passionate gamer and get frustrated quite easily when a board game does not go my way. For some reason, I always enjoy playing Blokus - wheter I'm winning or not. And being a computer scientist by training, I was always wondering what weird/effective strategies a powerful RL agent would uncover.
 
