@@ -1,5 +1,5 @@
 use std::fmt;
-use std::fmt::Write as _;
+use std::fmt::Write;
 use std::ops;
 
 pub const BOARD_SIZE: usize = 20;
