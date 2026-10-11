@@ -1,10 +1,12 @@
 mod actions;
 mod agents;
-pub mod bitboard;
+pub(crate) mod bitboard;
 pub mod errors;
+pub mod pentobi;
 mod pieces;
 
-use self::actions::{Action, ActionSet};
+use self::actions::Action;
+pub use self::actions::ActionSet;
 use self::agents::{ALL_PIECES, Agent, Color};
 pub use self::bitboard::BOARD_SIZE;
 use self::bitboard::{Bitboard, MAX_IDX, SEPARATING_BIT_MASK};
@@ -12,10 +14,7 @@ use self::errors::InvalidAction;
 pub use self::pieces::PieceType;
 use std::fmt;
 use std::fmt::Write as _;
-use std::sync::OnceLock;
-
-/// The action set is identical for every game, so it is built once and shared across resets.
-static ACTION_SET: OnceLock<ActionSet> = OnceLock::new();
+use std::ops::ControlFlow;
 
 /// The agents in turn order, starting from each agent.
 const AGENT_ORDER: [[Color; 4]; 4] = [
@@ -25,8 +24,9 @@ const AGENT_ORDER: [[Color; 4]; 4] = [
     [Color::Green, Color::Blue, Color::Yellow, Color::Red],
 ];
 
-/// The start cell of the agent `k` seats after another one, in that other agent's frame.
-pub const START_CELLS: [Bitboard; 4] = [
+/// The start cell of the agent `k` seats after another one, in that other agent's frame. Boards
+/// are stored in the frame of agent 0, so these are the agents' start cells there.
+pub(crate) const START_CELLS: [Bitboard; 4] = [
     Bitboard::cell(0, 0),
     Bitboard::cell(0, BOARD_SIZE - 1),
     Bitboard::cell(BOARD_SIZE - 1, BOARD_SIZE - 1),
@@ -35,6 +35,26 @@ pub const START_CELLS: [Bitboard; 4] = [
 
 /// Bytes per agent written by `Game::to_bytes`: its board, pieces and last piece.
 const AGENT_BYTES: usize = 64 + 4 + 1;
+
+/// Length of the `planes` written by `Game::encode`: the occupied cells, corners and blocked
+/// cells of each agent, see `Observation`, as (plane, row, col) bytes of 0/1.
+pub const PLANES_LEN: usize = 3 * 4 * BOARD_SIZE * BOARD_SIZE;
+
+/// Length of the `globals` written by `Game::encode`: the pieces of each agent as 0/1 in
+/// (agent, piece) order, the done flag of each agent as 0/1, the seat and the ply.
+pub const GLOBALS_LEN: usize = 4 * PieceType::ALL.len() + 4 + 2;
+
+/// Zobrist keys for every agent and bit of the board, see `Game::hash`.
+static CELL_KEYS: [[u64; MAX_IDX + 1]; 4] = cell_keys();
+
+/// Zobrist keys for the agent to move.
+const TURN_KEYS: [u64; 4] = agent_keys(4 * (MAX_IDX as u64 + 1));
+
+/// Zobrist keys for the agents that placed all pieces with the monomino last, which scores +5.
+const BONUS_KEYS: [u64; 4] = agent_keys(4 * (MAX_IDX as u64 + 1) + 4);
+
+/// Shape (orientation, row, col) of the action grid, see `ActionSet::grid_idx`.
+pub const ACTION_GRID_SHAPE: (usize, usize, usize) = (91, BOARD_SIZE, BOARD_SIZE);
 
 /// What the final rewards are based on, see `Game::outcome`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -50,7 +70,7 @@ pub enum RewardMode {
 /// What an agent observes, in its frame and with the agents in agent-relative order: itself, the
 /// next to move, the one after, and the previous one.
 #[derive(PartialEq, Debug)]
-pub struct Observation {
+pub(crate) struct Observation {
     /// The cells each agent occupies.
     pub boards: [Bitboard; 4],
     /// The free cells each agent's next piece can attach to: diagonal but not edge-adjacent to its
@@ -62,22 +82,32 @@ pub struct Observation {
     pub pieces: [u32; 4],
     /// Whether each agent is out of moves.
     pub done: [bool; 4],
-    /// The legal actions over the flattened (orientation, row, col) action grid, as bytes of 0/1.
-    pub action_mask: Vec<u8>,
 }
 
 /// The game state. It holds no heap allocations, so it is cheap to copy.
+///
+/// Agents are numbered in turn order, 0 moves first. Actions are indices into the action set,
+/// each in the frame of the agent that plays it; see `ActionSet::grid_idx` for the policy grid.
 #[derive(Clone, Copy)]
 pub struct Game {
-    pub action_set: &'static ActionSet,
-    pub agent_selection: usize,
-    pub num_agents: usize,
-    pub agents: [Agent; 4],
+    pub(crate) action_set: &'static ActionSet,
+    pub(crate) agent_selection: usize,
+    pub(crate) num_agents: usize,
+    /// The agents, with their boards in the frame of agent 0.
+    pub(crate) agents: [Agent; 4],
+    /// The Zobrist keys of the agents' cells, see `hash`.
+    zobrist: u64,
+}
+
+impl Default for Game {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Game {
+    #[must_use]
     pub fn new() -> Self {
-        let action_set = ACTION_SET.get_or_init(|| ActionSet::new(&pieces::generate()));
         let agents = [
             Agent::new(Color::Blue),
             Agent::new(Color::Yellow),
@@ -87,40 +117,84 @@ impl Game {
         let num_agents: usize = 4;
         let agent_selection: usize = 0;
         Self {
-            action_set,
+            action_set: ActionSet::get(),
             agent_selection,
             num_agents,
             agents,
+            zobrist: 0,
         }
     }
 
+    /// The agent to move. Agents that are out of moves are skipped; once the game is over, it is
+    /// the agent that would move next.
+    #[must_use]
+    pub fn current_player(&self) -> usize {
+        (0..4)
+            .map(|k| (self.agent_selection + k) % 4)
+            .find(|a| !self.agents[*a].done)
+            .unwrap_or(self.agent_selection)
+    }
+
+    /// Writes the legal actions of the agent to move into `out`, which is cleared first.
+    pub fn legal_moves(&self, out: &mut Vec<u16>) {
+        self.legal_moves_for(self.current_player(), out);
+    }
+
+    /// Plays the action of the agent to move. The action must be legal, which is only checked in
+    /// debug builds.
+    ///
+    /// # Panics
+    ///
+    /// If `action` is not below 30,433, the number of actions.
+    pub fn apply(&mut self, action: u16) {
+        let agent = self.current_player();
+        debug_assert!(
+            self.is_legal(agent, usize::from(action)),
+            "Illegal action {action} for agent {agent}"
+        );
+        self.place(agent, usize::from(action));
+        self.agent_selection = (agent + 1) % 4;
+    }
+
+    /// The Zobrist hash of the position: the cells of every agent, the agent to move, and the
+    /// agents that earned the monomino bonus.
+    #[must_use]
+    pub fn hash(&self) -> u64 {
+        let bonus = (0..4)
+            .filter(|a| {
+                self.agents[*a].pieces == 0 && self.agents[*a].last_piece == Some(PieceType::I1)
+            })
+            .fold(0, |h, a| h ^ BONUS_KEYS[a]);
+        self.zobrist ^ TURN_KEYS[self.current_player()] ^ bonus
+    }
+
+    /// Writes the observation of the agent to move into `planes` and `globals`, see `PLANES_LEN`
+    /// and `GLOBALS_LEN` for the layout. It is the observation of the Python environment.
+    ///
+    /// # Panics
+    ///
+    /// If `planes` is shorter than `PLANES_LEN` or `globals` is shorter than `GLOBALS_LEN`.
+    pub fn encode(&self, planes: &mut [u8], globals: &mut [f32]) {
+        self.encode_for(self.current_player(), planes, globals);
+    }
+
     /// Returns what the agent observes, see `Observation`.
-    pub fn observe(&self, agent_idx: usize) -> Observation {
+    pub(crate) fn observe(&self, agent_idx: usize) -> Observation {
         let order = AGENT_ORDER[agent_idx];
-        let boards = self.align_boards(agent_idx);
+        let boards = order.map(|c| into_frame(self.agents[c as usize].board, agent_idx));
         let occupied = boards[0] | boards[1] | boards[2] | boards[3];
         let blocked = boards.map(|own| own.dilate_ortho() | occupied);
         let corners = std::array::from_fn(|k| corners(boards[k], blocked[k], START_CELLS[k]));
-        let pieces = order.map(|c| self.agents[c as usize].pieces);
-        let action_mask = self
-            .action_set
-            .grid_mask(self.fitting_actions(pieces[0], blocked[0], corners[0]));
         Observation {
             boards,
             corners,
             blocked,
-            pieces,
+            pieces: order.map(|c| self.agents[c as usize].pieces),
             done: order.map(|c| self.agents[c as usize].done),
-            action_mask,
         }
     }
 
-    /// The indices of the actions the agent can play.
-    pub fn legal_actions(&self, agent_idx: usize) -> impl Iterator<Item = usize> + '_ {
-        let (blocked, corners) = self.placement_masks(agent_idx);
-        self.fitting_actions(self.agents[agent_idx].pieces, blocked, corners)
-    }
-
+    #[must_use]
     pub fn terminations(&self) -> [bool; 4] {
         [
             self.agents[0].done,
@@ -132,6 +206,7 @@ impl Game {
 
     /// Each agent's official score as if the game ended now: minus the squares of its remaining
     /// pieces, +15 for placing all pieces, +20 if the monomino was placed last.
+    #[must_use]
     pub fn scores(&self) -> [i16; 4] {
         self.agents.map(|a| {
             let remaining = PieceType::iter()
@@ -148,6 +223,7 @@ impl Game {
     }
 
     /// The score of every agent that is done, it is final since an agent never regains moves.
+    #[must_use]
     pub fn rewards(&self) -> Vec<Option<i16>> {
         self.agents
             .iter()
@@ -157,46 +233,49 @@ impl Game {
     }
 
     /// The game is over once every agent is out of moves.
+    #[must_use]
     pub fn is_over(&self) -> bool {
         self.agents.iter().all(|a| a.done)
     }
 
     /// The final reward of every agent in `mode`, None until the game is over.
+    #[must_use]
     pub fn outcome(&self, mode: RewardMode) -> Option<[f32; 4]> {
         self.is_over()
             .then(|| outcome_from_scores(self.scores(), mode))
     }
 
     /// The number of placements made so far, by all agents.
+    #[must_use]
     pub fn ply(&self) -> u16 {
         self.agents.iter().map(|a| u16::from(a.turn)).sum()
     }
 
-    /// Plays the action at `grid_idx` of the flattened (orientation, row, col) action grid.
-    /// Agents that are done pass their turn regardless of the action, e.g. with `None`.
+    /// Plays the action at `grid_idx` of the flattened (orientation, row, col) action grid for the
+    /// selected agent, then selects the next agent. Agents that are done pass their turn
+    /// regardless of the action, e.g. with `None`.
+    ///
+    /// # Errors
+    ///
+    /// If the selected agent has moves and `grid_idx` is not one of them.
     pub fn step(&mut self, grid_idx: Option<usize>) -> Result<(), InvalidAction> {
-        let agent = &self.agents[self.agent_selection];
-        if !agent.done {
-            let (blocked, corners) = self.placement_masks(self.agent_selection);
-            let action_idx = grid_idx
+        let agent = self.agent_selection;
+        if !self.agents[agent].done {
+            let action = grid_idx
                 .and_then(|i| self.action_set.grid_map.get(i).copied().flatten())
-                .filter(|i| {
-                    let action = &self.action_set[*i];
-                    agent.pieces & (1 << action.piece_type.index()) != 0
-                        && check_action_valid(action.bitboard, blocked, corners)
-                })
+                .filter(|a| self.is_legal(agent, *a))
                 .ok_or_else(|| InvalidAction::new("Action index not available".to_owned()))?;
-            let action = self.action_set[action_idx];
-            self.execute_action(&action);
-            self.update_done();
+            self.place(agent, action);
         }
         // switch control to next agent
-        self.agent_selection = (self.agent_selection + 1) % 4;
+        self.agent_selection = (agent + 1) % 4;
         Ok(())
     }
 
-    /// The state as bytes: per agent its board, pieces and last piece, then the agent selection.
+    /// The state as bytes: per agent its board in the frame of agent 0, its pieces and its last
+    /// piece, then the selected agent.
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn to_bytes(self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(4 * AGENT_BYTES + 1);
         for a in &self.agents {
@@ -214,6 +293,7 @@ impl Game {
     /// The state written by `to_bytes`, None if `bytes` is not one. It does not check that the
     /// position can be reached in a game.
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let (agent_selection, agents) = bytes.split_last()?;
         if agents.len() != 4 * AGENT_BYTES || *agent_selection >= 4 {
@@ -226,10 +306,10 @@ impl Game {
             .iter_mut()
             .zip(agents.as_chunks::<AGENT_BYTES>().0)
         {
-            let word =
-                |i: usize| u128::from_le_bytes(chunk[16 * i..16 * (i + 1)].try_into().unwrap());
+            let words = chunk[..64].as_chunks::<16>().0;
+            let word = |i: usize| u128::from_le_bytes(words[i]);
             a.board = Bitboard(word(0), word(1), word(2), word(3));
-            a.pieces = u32::from_le_bytes(chunk[64..68].try_into().unwrap());
+            a.pieces = u32::from_le_bytes([chunk[64], chunk[65], chunk[66], chunk[67]]);
             a.last_piece = match chunk[68] {
                 0 => None,
                 x => Some(PieceType::iter().find(|p| *p as u8 == x)?),
@@ -240,51 +320,104 @@ impl Game {
             }
             a.turn = (ALL_PIECES & !a.pieces).count_ones() as u8;
         }
+        game.zobrist = game.full_zobrist();
         game.update_done();
         Some(game)
     }
 
-    fn align_boards(&self, agent_idx: usize) -> [Bitboard; 4] {
-        let order = AGENT_ORDER[agent_idx];
-        [
-            self.agents[order[0] as usize].board,
-            self.agents[order[1] as usize].board.rotate_clock(),
-            self.agents[order[2] as usize]
-                .board
-                .rotate_anticlock()
-                .rotate_anticlock(),
-            self.agents[order[3] as usize].board.rotate_anticlock(),
-        ]
+    /// Writes the legal actions of the agent into `out`, in its frame.
+    pub(crate) fn legal_moves_for(&self, agent: usize, out: &mut Vec<u16>) {
+        out.clear();
+        let into_agent_frame = &self.action_set.rotated[(4 - agent) % 4];
+        let _ = self.for_each_placement(agent, |global| {
+            out.push(into_agent_frame[global]);
+            ControlFlow::Continue(())
+        });
     }
 
-    /// The cells the agent can not fill and the corners its next piece must cover, in its frame.
-    fn placement_masks(&self, agent_idx: usize) -> (Bitboard, Bitboard) {
-        let boards = self.align_boards(agent_idx);
-        let blocked = boards[0].dilate_ortho() | boards[1] | boards[2] | boards[3];
-        (blocked, corners(boards[0], blocked, START_CELLS[0]))
+    /// See `encode`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    pub(crate) fn encode_for(&self, agent: usize, planes: &mut [u8], globals: &mut [f32]) {
+        let obs = self.observe(agent);
+        let planes = &mut planes[..PLANES_LEN];
+        planes.fill(0);
+        let boards = obs.boards.iter().chain(&obs.corners).chain(&obs.blocked);
+        for (plane, board) in boards.enumerate() {
+            for idx in board.ones() {
+                // the separating bit ends every row of the board
+                planes[plane * BOARD_SIZE * BOARD_SIZE + idx - idx / (BOARD_SIZE + 1)] = 1;
+            }
+        }
+        let pieces = obs
+            .pieces
+            .iter()
+            .flat_map(|p| (0..PieceType::ALL.len()).map(move |i| p >> i & 1));
+        let done = obs.done.map(u32::from);
+        let values = pieces
+            .chain(done)
+            .chain([agent as u32, u32::from(self.ply())]);
+        for (g, v) in globals[..GLOBALS_LEN].iter_mut().zip(values) {
+            *g = v as f32;
+        }
     }
 
-    /// The placements of the `pieces` that avoid the `blocked` cells and cover one of the `corners`.
-    fn fitting_actions(
+    /// The Zobrist keys of the agents' cells, computed from scratch.
+    pub(crate) fn full_zobrist(&self) -> u64 {
+        (0..4).fold(0, |h, a| h ^ cells_key(a, self.agents[a].board))
+    }
+
+    /// Whether the agent can play the action, in its frame.
+    pub(crate) fn is_legal(&self, agent: usize, action: usize) -> bool {
+        let action = self.action_set[usize::from(self.action_set.rotated[agent][action])];
+        let (blocked, corners) = self.placement_masks(agent);
+        self.agents[agent].pieces & (1 << action.piece_type.index()) != 0
+            && check_action_valid(action.bitboard, blocked, corners)
+    }
+
+    /// The cells the agent can not fill and the corners its next piece must cover, in the frame of
+    /// agent 0.
+    fn placement_masks(&self, agent: usize) -> (Bitboard, Bitboard) {
+        let own = self.agents[agent].board;
+        let occupied = self.agents.iter().fold(own, |acc, a| acc | a.board);
+        let blocked = own.dilate_ortho() | occupied;
+        (blocked, corners(own, blocked, START_CELLS[agent]))
+    }
+
+    /// Calls `visit` with every legal action of the agent, in the frame of agent 0, until it
+    /// breaks. Only the placements that cover one of the agent's corners are tested.
+    fn for_each_placement(
         &self,
-        pieces: u32,
-        blocked: Bitboard,
-        corners: Bitboard,
-    ) -> impl Iterator<Item = usize> + '_ {
-        PieceType::iter()
-            .enumerate()
-            .filter(move |(i, _)| pieces & (1 << i) != 0)
-            .flat_map(|(_, p)| self.action_set.piece_map[&p].clone())
-            .filter(move |a| check_action_valid(self.action_set[*a].bitboard, blocked, corners))
+        agent: usize,
+        mut visit: impl FnMut(usize) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let pieces = self.agents[agent].pieces;
+        let (blocked, corners) = self.placement_masks(agent);
+        let mut skip = blocked;
+        for corner in corners.ones() {
+            for piece in (0..PieceType::ALL.len()).filter(|i| pieces & (1 << i) != 0) {
+                for &action in self.action_set.covering(corner, piece) {
+                    let action = usize::from(action);
+                    if (self.action_set[action].bitboard & skip).is_empty() {
+                        visit(action)?;
+                    }
+                }
+            }
+            // a placement that covers this corner was visited from it
+            skip |= Bitboard::bit(corner);
+        }
+        ControlFlow::Continue(())
     }
 
-    fn execute_action(&mut self, action: &Action) {
-        let agent = &mut self.agents[self.agent_selection];
-        // execute action, the agent's own board is already in its frame
-        agent.board |= action.bitboard;
-        agent.turn += 1;
-        agent.pieces &= !(1 << action.piece_type.index());
-        agent.last_piece = Some(action.piece_type);
+    /// Places the action of the agent, in its frame.
+    fn place(&mut self, agent: usize, action: usize) {
+        let action: Action = self.action_set[usize::from(self.action_set.rotated[agent][action])];
+        let a = &mut self.agents[agent];
+        a.board |= action.bitboard;
+        a.turn += 1;
+        a.pieces &= !(1 << action.piece_type.index());
+        a.last_piece = Some(action.piece_type);
+        self.zobrist ^= cells_key(agent, action.bitboard);
+        self.update_done();
     }
 
     /// Flags the agents that are out of moves. An agent never regains moves, so only the agents
@@ -292,8 +425,8 @@ impl Game {
     fn update_done(&mut self) {
         for i in 0..4 {
             if !self.agents[i].done {
-                let done = self.legal_actions(i).next().is_none();
-                self.agents[i].done = done;
+                let done = self.for_each_placement(i, |_| ControlFlow::Break(()));
+                self.agents[i].done = done.is_continue();
             }
         }
     }
@@ -301,6 +434,48 @@ impl Game {
     pub fn render(&self) {
         println!("{self}");
     }
+}
+
+/// Rotates a board from the frame of agent 0 into the frame of the agent.
+fn into_frame(board: Bitboard, agent: usize) -> Bitboard {
+    match agent {
+        0 => board,
+        1 => board.rotate_anticlock(),
+        2 => board.rotate_clock().rotate_clock(),
+        _ => board.rotate_clock(),
+    }
+}
+
+/// The XOR of the agent's Zobrist keys for the cells of `board`.
+fn cells_key(agent: usize, board: Bitboard) -> u64 {
+    board.ones().fold(0, |h, idx| h ^ CELL_KEYS[agent][idx])
+}
+
+/// The `i`-th output of the `SplitMix64` generator.
+const fn zobrist_key(i: u64) -> u64 {
+    let mut z = (i + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+const fn agent_keys(first: u64) -> [u64; 4] {
+    [
+        zobrist_key(first),
+        zobrist_key(first + 1),
+        zobrist_key(first + 2),
+        zobrist_key(first + 3),
+    ]
+}
+
+const fn cell_keys() -> [[u64; MAX_IDX + 1]; 4] {
+    let mut keys = [[0; MAX_IDX + 1]; 4];
+    let mut i = 0;
+    while i < 4 * (MAX_IDX + 1) {
+        keys[i / (MAX_IDX + 1)][i % (MAX_IDX + 1)] = zobrist_key(i as u64);
+        i += 1;
+    }
+    keys
 }
 
 fn cell_occupier(boards: &[Bitboard; 4], idx: usize) -> Option<Color> {
@@ -357,7 +532,7 @@ fn outcome_from_scores(scores: [i16; 4], mode: RewardMode) -> [f32; 4] {
 
 impl fmt::Display for Game {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let boards = self.align_boards(0);
+        let boards = self.agents.map(|a| a.board);
 
         let horizontal = "-".repeat(3 * BOARD_SIZE + 43);
         let mut board = String::from("  | ");
@@ -395,6 +570,22 @@ impl fmt::Debug for Game {
             .field("num_agents", &self.num_agents)
             .field("agent_selection", &self.agent_selection)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+impl Game {
+    /// The agent's legal actions in its frame, found by testing every placement of its pieces as
+    /// before the corner-anchored generation. It is the oracle for `legal_moves`.
+    pub(crate) fn oracle_moves(&self, agent: usize) -> impl Iterator<Item = u16> + '_ {
+        let obs = self.observe(agent);
+        (0..self.action_set.actions.len())
+            .filter(move |a| {
+                let action = self.action_set[*a];
+                obs.pieces[0] & (1 << action.piece_type.index()) != 0
+                    && check_action_valid(action.bitboard, obs.blocked[0], obs.corners[0])
+            })
+            .map(|a| u16::try_from(a).unwrap())
     }
 }
 

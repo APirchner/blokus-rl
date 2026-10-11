@@ -53,13 +53,16 @@ impl PieceType {
         PieceType::I5,
     ];
 
+    #[must_use]
     pub fn size(self) -> u8 {
         self as u8 % 6
     }
 
-    /// Position in `PieceType::ALL`.
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|p| *p == self).unwrap()
+    /// Position in `PieceType::ALL`, which is sorted by discriminant.
+    pub(crate) fn index(self) -> usize {
+        Self::ALL
+            .binary_search_by_key(&(self as u8), |p| *p as u8)
+            .unwrap()
     }
 
     pub fn iter() -> impl Iterator<Item = PieceType> {

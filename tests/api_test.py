@@ -1,6 +1,8 @@
 import copy
 from functools import partial
 
+import numpy as np
+
 from pettingzoo.test import api_test, seed_test
 from blokus_rl._blokus import PyBlokus
 from blokus_rl.blokus_env import REWARD_MODES, BlokusEnv
@@ -27,6 +29,30 @@ def full_game_test(seed: int) -> None:
     assert left_early, "no agent left before the game was over"
     scores = dict(zip(env.possible_agents, env._env.rewards))
     assert returns == scores, f"returns {returns} != scores {scores}"
+
+
+# piece sizes in the order of env.piece_names
+PIECE_SIZES = np.array([1, 2, 3, 3] + [4] * 5 + [5] * 12)
+
+
+def observation_test(seed: int) -> None:
+    # the observation's parts agree with each other at every ply
+    env = BlokusEnv(seed=seed, reward_mode="win_share")
+    env.reset(seed=seed)
+    for agent in env.agent_iter(max_iter=10_000):
+        obs, _, termination, truncation, _ = env.last()
+        placed = obs["observation"].sum(axis=(1, 2))
+        assert (placed == PIECE_SIZES @ ~obs["pieces"].T).all()
+        assert not (obs["corners"] & obs["blocked"]).any()
+        assert (obs["blocked"] >= obs["observation"].any(axis=0)).all()
+        assert obs["done"][0] == (obs["action_mask"].sum() == 0)
+        assert obs["seat"] == int(agent.split("_")[1])
+        assert obs["ply"] == env._env.ply
+        if termination or truncation:
+            action = None
+        else:
+            action = env.action_space(agent).sample(obs["action_mask"])
+        env.step(action)
 
 
 def competitive_game_test(seed: int, reward_mode: str) -> None:
@@ -116,5 +142,6 @@ if __name__ == "__main__":
         for mode in REWARD_MODES[1:]:
             competitive_game_test(seed, mode)
         deepcopy_test(seed)
+        observation_test(seed)
     bytes_test()
     print("All tests passed")
