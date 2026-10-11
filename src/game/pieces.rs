@@ -28,36 +28,58 @@ pub enum PieceType {
 }
 
 impl PieceType {
+    /// Every piece type, in the order of the `pieces` observation axis.
+    pub const ALL: [PieceType; 21] = [
+        PieceType::I1,
+        PieceType::I2,
+        PieceType::V3,
+        PieceType::I3,
+        PieceType::T4,
+        PieceType::O,
+        PieceType::L4,
+        PieceType::I4,
+        PieceType::Z4,
+        PieceType::F,
+        PieceType::X,
+        PieceType::P,
+        PieceType::W,
+        PieceType::Z5,
+        PieceType::Y,
+        PieceType::L5,
+        PieceType::U,
+        PieceType::T5,
+        PieceType::V5,
+        PieceType::N,
+        PieceType::I5,
+    ];
+
+    #[must_use]
     pub fn size(self) -> u8 {
         self as u8 % 6
     }
 
+    /// Position in `PieceType::ALL`.
+    pub(crate) fn index(self) -> usize {
+        // the positions by discriminant, filled from `ALL` at compile time
+        const INDEX: [usize; PieceType::I5 as usize + 1] = {
+            let mut index = [0; PieceType::I5 as usize + 1];
+            let mut i = 0;
+            while i < PieceType::ALL.len() {
+                index[PieceType::ALL[i] as usize] = i;
+                i += 1;
+            }
+            index
+        };
+        INDEX[self as usize]
+    }
+
+    /// The piece's bit in a set of pieces, bit `i` for `PieceType::ALL[i]`.
+    pub(crate) fn bit(self) -> u32 {
+        1 << self.index()
+    }
+
     pub fn iter() -> impl Iterator<Item = PieceType> {
-        [
-            PieceType::I1,
-            PieceType::I2,
-            PieceType::V3,
-            PieceType::I3,
-            PieceType::T4,
-            PieceType::O,
-            PieceType::L4,
-            PieceType::I4,
-            PieceType::Z4,
-            PieceType::F,
-            PieceType::X,
-            PieceType::P,
-            PieceType::W,
-            PieceType::Z5,
-            PieceType::Y,
-            PieceType::L5,
-            PieceType::U,
-            PieceType::T5,
-            PieceType::V5,
-            PieceType::N,
-            PieceType::I5,
-        ]
-        .iter()
-        .copied()
+        Self::ALL.iter().copied()
     }
 }
 
@@ -1097,6 +1119,14 @@ mod tests {
                 symmetries(&shapes[0]),
                 "{piece_type:?} has a wrong orientation"
             );
+        }
+    }
+
+    #[test]
+    fn test_index_is_position_in_all() {
+        for (i, piece_type) in PieceType::iter().enumerate() {
+            assert_eq!(piece_type.index(), i);
+            assert_eq!(piece_type.bit(), 1 << i);
         }
     }
 }

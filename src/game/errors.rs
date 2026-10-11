@@ -4,7 +4,7 @@ use std::fmt;
 pub struct InvalidAction(String);
 
 impl InvalidAction {
-    pub fn new(msg: String) -> Self {
+    pub(crate) fn new(msg: String) -> Self {
         InvalidAction(msg)
     }
 }
@@ -14,3 +14,5 @@ impl fmt::Display for InvalidAction {
         write!(f, "Invalid action: {}", self.0)
     }
 }
+
+impl std::error::Error for InvalidAction {}

@@ -1,9 +1,18 @@
+import copy
+
 import numpy as np
 from gymnasium import spaces
 from pettingzoo import AECEnv
 import pygame
 
 from blokus_rl._blokus import PyBlokus
+
+REWARD_MODES = PyBlokus.reward_modes
+
+
+def _bool_array(data: bytes, shape: tuple[int, ...]) -> np.ndarray:
+    # read-only view of the 0/1 bytes from Rust
+    return np.frombuffer(data, dtype=bool).reshape(shape)
 
 
 class BlokusEnv(AECEnv):
@@ -17,17 +26,26 @@ class BlokusEnv(AECEnv):
         render_mode: str | None = None,
         seed: int | None = None,
         screen_size: int = 512,
+        reward_mode: str = "score",
     ):
+        if reward_mode not in REWARD_MODES:
+            raise ValueError(
+                f"reward_mode must be one of {REWARD_MODES}, "
+                f"got {reward_mode!r}"
+            )
         super().__init__()
         self._env = PyBlokus()
+        self._reward_mode = reward_mode
         self.possible_agents = [f"agent_{i}" for i in self._env.agents]
+        num_agents = len(self.possible_agents)
+        num_pieces = len(self._env.piece_names)
         self._observation_spaces = {
             i: spaces.Dict(
                 {
                     "observation": spaces.Box(
                         low=0,
                         high=1,
-                        shape=(len(self.possible_agents), 20, 20),
+                        shape=(num_agents, 20, 20),
                         dtype=bool,
                     ),
                     "action_mask": spaces.Box(
@@ -35,6 +53,28 @@ class BlokusEnv(AECEnv):
                         high=1,
                         shape=(self._env.num_actions,),
                         dtype=np.int8,
+                    ),
+                    "pieces": spaces.Box(
+                        low=0,
+                        high=1,
+                        shape=(num_agents, num_pieces),
+                        dtype=bool,
+                    ),
+                    "corners": spaces.Box(
+                        low=0, high=1, shape=(num_agents, 20, 20), dtype=bool
+                    ),
+                    "blocked": spaces.Box(
+                        low=0, high=1, shape=(num_agents, 20, 20), dtype=bool
+                    ),
+                    "done": spaces.Box(
+                        low=0, high=1, shape=(num_agents,), dtype=bool
+                    ),
+                    "seat": spaces.Discrete(num_agents),
+                    "ply": spaces.Box(
+                        low=0,
+                        high=num_agents * num_pieces,
+                        shape=(),
+                        dtype=np.int16,
                     ),
                 }
             )
@@ -56,6 +96,11 @@ class BlokusEnv(AECEnv):
     def action_grid_shape(self) -> tuple[int, int, int]:
         """Shape (orientation, row, col) of the action grid, in C order."""
         return self._env.action_grid_shape
+
+    @property
+    def piece_names(self) -> tuple[str, ...]:
+        """Piece names, in the order of the observation's piece axis."""
+        return self._env.piece_names
 
     @property
     def observation_spaces(self):
@@ -135,33 +180,74 @@ class BlokusEnv(AECEnv):
         while self.agents:
             idx = self._env.agent_selection
             agent = f"agent_{idx}"
-            if agent in self.agents:
-                # observe() is what flags an agent without moves as done,
-                # its score is final then and handed out right away
-                self.observe(agent)
-                if self._env.terminations[idx]:
+            if agent not in self.agents:
+                self._env.step(None)
+                continue
+            if self._env.terminations[idx] and not self.terminations[agent]:
+                if self._reward_mode == "score":
+                    # an agent never regains moves, its score is final
                     self.terminations[agent] = True
                     self.rewards[agent] = self._env.rewards[idx]
-                self.agent_selection = agent
-                return
-            self._env.step(None)
+                elif self._env.is_over:
+                    # the outcome is only known now, all agents get it
+                    outcome = self._env.outcome(self._reward_mode)
+                    for a in self.agents:
+                        self.terminations[a] = True
+                        self.rewards[a] = outcome[int(a.split("_")[1])]
+                else:
+                    # out of moves before game end, its turns are skipped
+                    self._env.step(None)
+                    continue
+            if self._env.is_over:
+                scores = dict(zip(self.possible_agents, self._env.scores))
+                for a in self.agents:
+                    self.infos[a]["scores"] = dict(scores)
+            self.agent_selection = agent
+            return
 
     def observe(self, agent: str) -> dict:
         # cached until the next step, so the arrays are read-only
         if agent not in self._observations:
-            obs = self._env.observe(int(agent.split("_")[1]))
-            board = (
-                np.frombuffer(obs.observation, dtype=np.uint8)
-                .reshape(-1, 20, 20)
-                .astype(bool)
-            )
-            board.flags.writeable = False
+            idx = int(agent.split("_")[1])
+            obs = self._env.observe(idx)
+            num_agents = len(self.possible_agents)
+            ply = np.array(self._env.ply, dtype=np.int16)
+            ply.flags.writeable = False
             self._observations[agent] = {
-                "observation": board,
+                "observation": _bool_array(
+                    obs.observation, (num_agents, 20, 20)
+                ),
                 # read-only view of the bytes from Rust
                 "action_mask": np.frombuffer(obs.action_mask, dtype=np.int8),
+                "pieces": _bool_array(obs.pieces, (num_agents, -1)),
+                "corners": _bool_array(obs.corners, (num_agents, 20, 20)),
+                "blocked": _bool_array(obs.blocked, (num_agents, 20, 20)),
+                "done": _bool_array(obs.done, (num_agents,)),
+                "seat": idx,
+                "ply": ply,
             }
         return dict(self._observations[agent])
+
+    def __getstate__(self) -> dict:
+        # observations are recomputed; a copy does not render, e.g. when it
+        # branches off a tree search
+        state = self.__dict__.copy()
+        state.update(
+            _observations={}, _render_mode=None, _screen=None, _clock=None
+        )
+        return state
+
+    def __copy__(self) -> "BlokusEnv":
+        # a shallow copy would step the same game
+        return copy.deepcopy(self)
+
+    def __deepcopy__(self, memo: dict) -> "BlokusEnv":
+        clone = type(self).__new__(type(self))
+        memo[id(self)] = clone
+        # the observation spaces never change, so the copy shares them
+        memo[id(self._observation_spaces)] = self._observation_spaces
+        clone.__dict__.update(copy.deepcopy(self.__getstate__(), memo))
+        return clone
 
     def render(self) -> np.ndarray | None:
         obs = self.observe(self.possible_agents[0])["observation"]
