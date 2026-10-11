@@ -70,11 +70,11 @@ impl ActionSet {
         }
     }
 
-    /// Scatters an action mask into the flattened (orientation, row, col) grid.
-    pub fn grid_mask(&self, action_mask: &[bool]) -> Vec<bool> {
-        let mut grid = vec![false; self.grid_map.len()];
+    /// Scatters an action mask into the flattened (orientation, row, col) grid, as bytes of 0/1.
+    pub fn grid_mask(&self, action_mask: &[bool]) -> Vec<u8> {
+        let mut grid = vec![0; self.grid_map.len()];
         for (a, valid) in self.actions.iter().zip(action_mask) {
-            grid[a.grid_idx] = *valid;
+            grid[a.grid_idx] = u8::from(*valid);
         }
         grid
     }
@@ -85,14 +85,6 @@ impl ActionSet {
             init_actions.push(!(p.bitboard & Bitboard(0, 0, 0, 1)).is_empty());
         }
         init_actions
-    }
-}
-
-impl Index<PieceType> for ActionSet {
-    type Output = [Action];
-
-    fn index(&self, index: PieceType) -> &Self::Output {
-        &self.actions[self.piece_map[&index].start..self.piece_map[&index].end]
     }
 }
 

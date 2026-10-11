@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyAssertionError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 mod game;
 
@@ -51,22 +52,21 @@ impl PyBlokus {
         self.0.terminations()
     }
 
-    #[getter(truncations)]
-    pub fn truncations(&self) -> [bool; 4] {
-        self.0.terminations()
-    }
-
+    /// The score of every agent that is done, None for the others.
     #[getter(rewards)]
-    pub fn rewards(&self) -> Vec<i16> {
-        self.0
-            .rewards()
-            .unwrap_or_else(|| vec![0i16; self.0.num_agents])
+    pub fn rewards(&self) -> Vec<Option<i16>> {
+        self.0.rewards()
     }
 
-    pub fn observe(&mut self, action_idx: usize) -> PyObservation {
-        let (observation, action_mask) = self.0.observe(action_idx);
+    pub fn observe(&mut self, agent_idx: usize) -> PyObservation {
+        let (boards, action_mask) = self.0.observe(agent_idx);
         PyObservation {
-            observation,
+            observation: boards
+                .iter()
+                .flatten()
+                .flatten()
+                .map(|x| u8::from(*x))
+                .collect(),
             action_mask,
         }
     }
@@ -82,25 +82,22 @@ impl PyBlokus {
 
 #[pyclass(unsendable)]
 struct PyObservation {
-    observation: [[[bool; BOARD_SIZE]; BOARD_SIZE]; 4],
-    action_mask: Vec<bool>,
+    observation: Vec<u8>,
+    action_mask: Vec<u8>,
 }
 
 #[pymethods]
 impl PyObservation {
+    /// The boards in (agent, row, col) order as bytes of 0/1, cheap to wrap with `numpy.frombuffer`.
     #[getter(observation)]
-    pub fn observation(&self) -> [[[bool; BOARD_SIZE]; BOARD_SIZE]; 4] {
-        [
-            self.observation[0],
-            self.observation[1],
-            self.observation[2],
-            self.observation[3],
-        ]
+    pub fn observation<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.observation)
     }
 
+    /// The action mask as bytes of 0/1, cheap to wrap with `numpy.frombuffer`.
     #[getter(action_mask)]
-    pub fn action_mask(&self) -> Vec<bool> {
-        self.action_mask.clone()
+    pub fn action_mask<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.action_mask)
     }
 }
 
@@ -120,7 +117,7 @@ mod _blokus {
 
 #[cfg(test)]
 mod tests {
-    use crate::game::bitboard::{Bitboard, separating_bit_mask};
+    use crate::game::bitboard::{Bitboard, SEPARATING_BIT_MASK};
     use crate::game::{BOARD_SIZE, Game};
 
     #[test]
@@ -129,7 +126,7 @@ mod tests {
         assert_eq!(game.action_set.actions.len(), 30433);
         for a in &game.action_set.actions {
             assert!(
-                (a.bitboard & !separating_bit_mask()) == Bitboard::default(),
+                (a.bitboard & !SEPARATING_BIT_MASK) == Bitboard::default(),
                 "Invalid action!"
             );
         }
@@ -190,15 +187,43 @@ mod tests {
         game.observe(1);
         game.step(a22).unwrap();
         game.observe(2);
-        assert!(game.rewards().is_none());
+        assert_eq!(game.rewards(), [None; 4]);
+        // scores are handed out per agent, as soon as it is done
         game.agents[0].done = true;
+        assert_eq!(game.rewards(), [Some(-86), None, None, None]);
         game.agents[1].done = true;
         game.agents[2].done = true;
         game.agents[3].done = true;
-        assert_eq!(game.rewards().unwrap()[0], -86);
-        assert_eq!(game.rewards().unwrap()[1], -86);
-        assert_eq!(game.rewards().unwrap()[2], -87);
-        assert_eq!(game.rewards().unwrap()[3], -87);
+        assert_eq!(game.rewards(), [Some(-86), Some(-86), Some(-87), Some(-87)]);
+    }
+
+    #[test]
+    fn test_scoring_monomino_bonus() {
+        // +15 for placing all pieces, +5 if the last one was the monomino
+        let mut game = Game::new();
+        for (agent, last_size) in [(0, 1), (1, 2)] {
+            let action = *game
+                .action_set
+                .actions
+                .iter()
+                .enumerate()
+                .find(|(i, a)| {
+                    a.piece_type.size() == last_size && game.agents[agent].action_mask[*i]
+                })
+                .unwrap()
+                .1;
+            for available in game.agents[agent].pieces.values_mut() {
+                *available = false;
+            }
+            game.agents[agent].pieces.insert(action.piece_type, true);
+            game.step(Some(action.grid_idx)).unwrap();
+        }
+        for a in &mut game.agents {
+            a.done = true;
+        }
+        let rewards = game.rewards();
+        assert_eq!(rewards[0], Some(20));
+        assert_eq!(rewards[1], Some(15));
     }
 
     #[test]
@@ -243,14 +268,14 @@ mod tests {
             let grid = game.observe(agent).1;
             let mask = &game.agents[agent].action_mask;
             assert_eq!(
-                grid.iter().filter(|x| **x).count(),
+                grid.iter().filter(|x| **x == 1).count(),
                 mask.iter().filter(|x| **x).count()
             );
             for (a, valid) in game.action_set.actions.iter().zip(mask) {
-                assert_eq!(grid[a.grid_idx], *valid);
+                assert_eq!(grid[a.grid_idx], u8::from(*valid));
             }
             // vary the played actions without pulling in an RNG, agents without actions pass
-            let valid: Vec<usize> = (0..grid.len()).filter(|i| grid[*i]).collect();
+            let valid: Vec<usize> = (0..grid.len()).filter(|i| grid[*i] == 1).collect();
             let action = valid.get(turn * 7 % valid.len().max(1)).copied();
             game.step(action).unwrap();
         }
@@ -262,12 +287,13 @@ mod tests {
         let unmapped = game.action_set.grid_map.iter().position(Option::is_none);
         let out_of_range = Some(game.action_set.grid_map.len());
         let grid = game.observe(0).1;
-        let masked = (0..grid.len()).find(|i| game.action_set.grid_map[*i].is_some() && !grid[*i]);
+        let masked =
+            (0..grid.len()).find(|i| game.action_set.grid_map[*i].is_some() && grid[*i] == 0);
         for action in [unmapped, out_of_range, masked, None] {
             assert!(game.step(action).is_err());
             assert_eq!(game.agent_selection, 0);
         }
-        let valid = (0..grid.len()).find(|i| grid[*i]).unwrap();
+        let valid = (0..grid.len()).find(|i| grid[*i] == 1).unwrap();
         game.step(Some(valid)).unwrap();
         assert_eq!(game.agent_selection, 1);
         let action = game.action_set[game.action_set.grid_map[valid].unwrap()];

@@ -52,5 +52,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: dtolnay/rust-toolchain@stable
       - run: pip install .
-      - run: python -m blokus_rl.api_test
-        working-directory: /tmp
+      - run: python tests/api_test.py
