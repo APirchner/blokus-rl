@@ -5,10 +5,38 @@ use std::ops;
 pub const BOARD_SIZE: usize = 20;
 pub const MAX_IDX: usize = (BOARD_SIZE * (BOARD_SIZE + 1)) - 1;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct Bitboard(pub u128, pub u128, pub u128, pub u128);
 
 impl Bitboard {
+    /// The board with only the cell at (`row`, `col`) set.
+    pub const fn cell(row: usize, col: usize) -> Bitboard {
+        Bitboard::bit((BOARD_SIZE + 1) * row + col)
+    }
+
+    /// The board with only the bit `idx` set, see `bit_lookup`.
+    pub const fn bit(idx: usize) -> Bitboard {
+        let mut words = [0u128; 4];
+        words[3 - idx / 128] = 1 << (idx % 128);
+        Bitboard(words[0], words[1], words[2], words[3])
+    }
+
+    /// The indices of the set bits, in increasing order.
+    pub fn ones(self) -> impl Iterator<Item = usize> {
+        [self.3, self.2, self.1, self.0]
+            .into_iter()
+            .enumerate()
+            .flat_map(|(w, mut word)| {
+                std::iter::from_fn(move || {
+                    (word != 0).then(|| {
+                        let bit = word.trailing_zeros() as usize;
+                        word &= word - 1;
+                        128 * w + bit
+                    })
+                })
+            })
+    }
+
     pub fn is_empty(&self) -> bool {
         ((self.0 & (u128::MAX >> 92)) | self.1 | self.2 | self.3) == 0
     }
@@ -22,11 +50,20 @@ impl Bitboard {
     }
 
     pub fn rotate_clock(self) -> Bitboard {
-        self.flip().mirror_diagonal()
+        self.permute(&ROTATE_CLOCK)
     }
 
     pub fn rotate_anticlock(self) -> Bitboard {
-        self.mirror_diagonal().flip()
+        self.permute(&ROTATE_ANTICLOCK)
+    }
+
+    /// Moves every set bit `idx` to `table[idx]`.
+    fn permute(self, table: &[u16; MAX_IDX + 1]) -> Bitboard {
+        let mut moved = Bitboard::default();
+        for idx in self.ones() {
+            moved |= Bitboard::bit(usize::from(table[idx]));
+        }
+        moved
     }
 
     pub fn bit_lookup(&self, bit_idx: usize) -> bool {
@@ -37,44 +74,6 @@ impl Bitboard {
             384..=MAX_IDX => self.0 & (1 << (bit_idx - 3 * 128)) != 0,
             _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
         }
-    }
-
-    fn bit_flip(&mut self, bit_idx: usize) {
-        match bit_idx {
-            0..=127 => self.3 ^= 1 << bit_idx,
-            128..=255 => self.2 ^= 1 << (bit_idx - 128),
-            256..=383 => self.1 ^= 1 << (bit_idx - 2 * 128),
-            384..=MAX_IDX => self.0 ^= 1 << (bit_idx - 3 * 128),
-            _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
-        }
-    }
-
-    pub fn flip(self) -> Bitboard {
-        let mut board_flip = Bitboard::default();
-        for i in 0..BOARD_SIZE {
-            let right_shift = (BOARD_SIZE + 1) * i;
-            let left_shift = (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - i);
-            board_flip |= ((self >> right_shift) & ROW_MASK) << left_shift;
-        }
-        board_flip
-    }
-
-    pub fn mirror_diagonal(self) -> Bitboard {
-        let mut board_mirror = self;
-
-        for i in 1..BOARD_SIZE {
-            for j in 0..=i {
-                let idx_upper = (BOARD_SIZE + 1) * j + i;
-                let idx_lower = (BOARD_SIZE + 1) * i + j;
-                let bit_upper = self.bit_lookup(idx_upper);
-                let bit_lower = self.bit_lookup(idx_lower);
-                if (bit_upper && !bit_lower) || (bit_lower && !bit_upper) {
-                    board_mirror.bit_flip(idx_lower);
-                    board_mirror.bit_flip(idx_upper);
-                }
-            }
-        }
-        board_mirror
     }
 
     pub fn dilate_ortho(self) -> Bitboard {
@@ -244,5 +243,103 @@ const fn rows_mask(rows: usize) -> Bitboard {
     Bitboard(words[0], words[1], words[2], words[3])
 }
 
-const ROW_MASK: Bitboard = rows_mask(1);
 pub const SEPARATING_BIT_MASK: Bitboard = rows_mask(BOARD_SIZE);
+
+/// Where each bit moves when the board is rotated by a quarter turn clockwise.
+const ROTATE_CLOCK: [u16; MAX_IDX + 1] = rotation_table(true);
+/// Where each bit moves when the board is rotated by a quarter turn anticlockwise.
+const ROTATE_ANTICLOCK: [u16; MAX_IDX + 1] = rotation_table(false);
+
+#[allow(clippy::cast_possible_truncation)]
+const fn rotation_table(clockwise: bool) -> [u16; MAX_IDX + 1] {
+    let mut table = [0; MAX_IDX + 1];
+    let mut idx = 0;
+    while idx <= MAX_IDX {
+        let (row, col) = (idx / (BOARD_SIZE + 1), idx % (BOARD_SIZE + 1));
+        // the separating bits are never set and stay where they are
+        let moved = if col == BOARD_SIZE {
+            idx
+        } else if clockwise {
+            (BOARD_SIZE + 1) * col + BOARD_SIZE - 1 - row
+        } else {
+            (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - col) + row
+        };
+        table[idx] = moved as u16;
+        idx += 1;
+    }
+    table
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROW_MASK: Bitboard = rows_mask(1);
+
+    /// The rotations as they were computed before the lookup tables, kept as a test oracle.
+    impl Bitboard {
+        fn bit_flip(&mut self, bit_idx: usize) {
+            match bit_idx {
+                0..=127 => self.3 ^= 1 << bit_idx,
+                128..=255 => self.2 ^= 1 << (bit_idx - 128),
+                256..=383 => self.1 ^= 1 << (bit_idx - 2 * 128),
+                384..=MAX_IDX => self.0 ^= 1 << (bit_idx - 3 * 128),
+                _ => panic!("Bitboard index {bit_idx} out of range [0, {MAX_IDX}]"),
+            }
+        }
+
+        fn flip(self) -> Bitboard {
+            let mut board_flip = Bitboard::default();
+            for i in 0..BOARD_SIZE {
+                let right_shift = (BOARD_SIZE + 1) * i;
+                let left_shift = (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - i);
+                board_flip |= ((self >> right_shift) & ROW_MASK) << left_shift;
+            }
+            board_flip
+        }
+
+        fn mirror_diagonal(self) -> Bitboard {
+            let mut board_mirror = self;
+
+            for i in 1..BOARD_SIZE {
+                for j in 0..=i {
+                    let idx_upper = (BOARD_SIZE + 1) * j + i;
+                    let idx_lower = (BOARD_SIZE + 1) * i + j;
+                    let bit_upper = self.bit_lookup(idx_upper);
+                    let bit_lower = self.bit_lookup(idx_lower);
+                    if (bit_upper && !bit_lower) || (bit_lower && !bit_upper) {
+                        board_mirror.bit_flip(idx_lower);
+                        board_mirror.bit_flip(idx_upper);
+                    }
+                }
+            }
+            board_mirror
+        }
+    }
+
+    #[test]
+    fn test_rotations_match_oracle() {
+        // a board with a different pattern in every row and column
+        let mut board = Bitboard::default();
+        for idx in 0..MAX_IDX {
+            if idx % (BOARD_SIZE + 1) != BOARD_SIZE && (idx * idx + 3 * idx) % 7 < 3 {
+                board |= Bitboard::bit(idx);
+            }
+        }
+        assert_eq!(board.rotate_clock(), board.flip().mirror_diagonal());
+        assert_eq!(board.rotate_anticlock(), board.mirror_diagonal().flip());
+        for row in 0..BOARD_SIZE {
+            for col in 0..BOARD_SIZE {
+                let cell = Bitboard::cell(row, col);
+                assert_eq!(cell.rotate_clock(), cell.flip().mirror_diagonal());
+                assert_eq!(cell.rotate_anticlock(), cell.mirror_diagonal().flip());
+            }
+        }
+    }
+
+    #[test]
+    fn test_ones() {
+        let board = Bitboard::bit(0) | Bitboard::bit(127) | Bitboard::bit(128) | Bitboard::bit(418);
+        assert_eq!(board.ones().collect::<Vec<_>>(), [0, 127, 128, 418]);
+    }
+}

@@ -10,6 +10,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check
+      # the Rust library without the Python extension, and the benchmarks
+      - run: cargo check --no-default-features
+      - run: cargo check --benches
 
   test:
     name: Test Suite
@@ -37,7 +40,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy -- -W clippy::all -W clippy::pedantic -D warnings
+      - run: cargo clippy --all-targets -- -W clippy::all -W clippy::pedantic -D warnings
+      # the Rust library without the Python extension
+      - run: cargo clippy --no-default-features --all-targets -- -W clippy::all -W clippy::pedantic -D warnings
 
   python:
     name: Python API Test (${{ matrix.python-version }})
