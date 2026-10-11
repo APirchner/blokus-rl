@@ -52,13 +52,6 @@ impl PyBlokus {
         self.0.terminations()
     }
 
-    /// Blokus has no turn limit, so agents are never truncated.
-    #[getter(truncations)]
-    #[allow(clippy::unused_self)]
-    pub fn truncations(&self) -> [bool; 4] {
-        [false; 4]
-    }
-
     #[getter(rewards)]
     pub fn rewards(&self) -> Vec<i16> {
         self.0
@@ -67,10 +60,15 @@ impl PyBlokus {
     }
 
     pub fn observe(&mut self, agent_idx: usize) -> PyObservation {
-        let (observation, action_mask) = self.0.observe(agent_idx);
+        let (boards, action_mask) = self.0.observe(agent_idx);
         PyObservation {
-            observation,
-            action_mask: action_mask.into_iter().map(u8::from).collect(),
+            observation: boards
+                .iter()
+                .flatten()
+                .flatten()
+                .map(|x| u8::from(*x))
+                .collect(),
+            action_mask,
         }
     }
 
@@ -85,20 +83,16 @@ impl PyBlokus {
 
 #[pyclass(unsendable)]
 struct PyObservation {
-    observation: [[[bool; BOARD_SIZE]; BOARD_SIZE]; 4],
+    observation: Vec<u8>,
     action_mask: Vec<u8>,
 }
 
 #[pymethods]
 impl PyObservation {
+    /// The boards in (agent, row, col) order as bytes of 0/1, cheap to wrap with `numpy.frombuffer`.
     #[getter(observation)]
-    pub fn observation(&self) -> [[[bool; BOARD_SIZE]; BOARD_SIZE]; 4] {
-        [
-            self.observation[0],
-            self.observation[1],
-            self.observation[2],
-            self.observation[3],
-        ]
+    pub fn observation<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.observation)
     }
 
     /// The action mask as bytes of 0/1, cheap to wrap with `numpy.frombuffer`.
@@ -276,14 +270,14 @@ mod tests {
             let grid = game.observe(agent).1;
             let mask = &game.agents[agent].action_mask;
             assert_eq!(
-                grid.iter().filter(|x| **x).count(),
+                grid.iter().filter(|x| **x == 1).count(),
                 mask.iter().filter(|x| **x).count()
             );
             for (a, valid) in game.action_set.actions.iter().zip(mask) {
-                assert_eq!(grid[a.grid_idx], *valid);
+                assert_eq!(grid[a.grid_idx], u8::from(*valid));
             }
             // vary the played actions without pulling in an RNG, agents without actions pass
-            let valid: Vec<usize> = (0..grid.len()).filter(|i| grid[*i]).collect();
+            let valid: Vec<usize> = (0..grid.len()).filter(|i| grid[*i] == 1).collect();
             let action = valid.get(turn * 7 % valid.len().max(1)).copied();
             game.step(action).unwrap();
         }
@@ -295,12 +289,13 @@ mod tests {
         let unmapped = game.action_set.grid_map.iter().position(Option::is_none);
         let out_of_range = Some(game.action_set.grid_map.len());
         let grid = game.observe(0).1;
-        let masked = (0..grid.len()).find(|i| game.action_set.grid_map[*i].is_some() && !grid[*i]);
+        let masked =
+            (0..grid.len()).find(|i| game.action_set.grid_map[*i].is_some() && grid[*i] == 0);
         for action in [unmapped, out_of_range, masked, None] {
             assert!(game.step(action).is_err());
             assert_eq!(game.agent_selection, 0);
         }
-        let valid = (0..grid.len()).find(|i| grid[*i]).unwrap();
+        let valid = (0..grid.len()).find(|i| grid[*i] == 1).unwrap();
         game.step(Some(valid)).unwrap();
         assert_eq!(game.agent_selection, 1);
         let action = game.action_set[game.action_set.grid_map[valid].unwrap()];

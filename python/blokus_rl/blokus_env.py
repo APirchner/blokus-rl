@@ -20,13 +20,14 @@ class BlokusEnv(AECEnv):
     ):
         super().__init__()
         self._env = PyBlokus()
+        self.possible_agents = [f"agent_{i}" for i in self._env.agents]
         self._observation_spaces = {
             i: spaces.Dict(
                 {
                     "observation": spaces.Box(
                         low=0,
                         high=1,
-                        shape=(self.num_agents, 20, 20),
+                        shape=(len(self.possible_agents), 20, 20),
                         dtype=bool,
                     ),
                     "action_mask": spaces.Box(
@@ -37,55 +38,19 @@ class BlokusEnv(AECEnv):
                     ),
                 }
             )
-            for i in self.agents
+            for i in self.possible_agents
         }
         self._action_spaces = {
-            i: spaces.Discrete(self._env.num_actions) for i in self.agents
+            i: spaces.Discrete(self._env.num_actions)
+            for i in self.possible_agents
         }
         self._seed_action_spaces(seed)
-        self._cumulative_rewards = {i: 0 for i in self.agents}
-        self._infos = {i: {} for i in self.agents}
+        self._reset_agents()
         self._observations = {}
         self._render_mode = render_mode
         self._screen = None
         self._screen_size = screen_size
         self._clock = None
-
-    @property
-    def agents(self) -> list[str]:
-        return [f"agent_{i}" for i in self._env.agents]
-
-    @property
-    def possible_agents(self) -> list[str]:
-        return self.agents
-
-    @property
-    def agent_selection(self) -> str:
-        return f"agent_{self._env.agent_selection}"
-
-    @property
-    def terminations(self) -> dict[str, bool]:
-        return {
-            i: self._env.terminations[int(i.split("_")[1])]
-            for i in self.agents
-        }
-
-    @property
-    def truncations(self) -> dict[str, bool]:
-        return {
-            i: self._env.truncations[int(i.split("_")[1])]
-            for i in self.agents
-        }
-
-    @property
-    def rewards(self) -> dict[str, int]:
-        return {
-            i: self._env.rewards[int(i.split("_")[1])] for i in self.agents
-        }
-
-    @property
-    def infos(self) -> dict[str, dict]:
-        return self._infos
 
     @property
     def action_grid_shape(self) -> tuple[int, int, int]:
@@ -134,37 +99,71 @@ class BlokusEnv(AECEnv):
     def reset(
         self, seed: int | None = None, options: dict | None = None
     ) -> None:
-        self._cumulative_rewards = {i: 0 for i in self.agents}
-        self._infos = {i: {} for i in self.agents}
         self._seed_action_spaces(seed)
         self._env.reset()
+        self._reset_agents()
         self._observations.clear()
         self._render_setup()
 
+    def _reset_agents(self) -> None:
+        self.agents = self.possible_agents[:]
+        self.agent_selection = f"agent_{self._env.agent_selection}"
+        self.rewards = {i: 0 for i in self.agents}
+        self._cumulative_rewards = {i: 0 for i in self.agents}
+        self.terminations = {i: False for i in self.agents}
+        self.truncations = {i: False for i in self.agents}
+        self.infos = {i: {} for i in self.agents}
+
     def step(self, action: int | None) -> None:
         agent = self.agent_selection
+        if self.terminations[agent] or self.truncations[agent]:
+            # only once the game is over, then every agent is removed in turn
+            self._was_dead_step(action)
+            return
         self._env.step(action)
-        self._observations.clear()
         self._cumulative_rewards[agent] = 0
-        self.observe(self.agent_selection)
+        self._select_next_agent()
+        self.terminations = dict(
+            zip(self.possible_agents, self._env.terminations)
+        )
+        # 0 until the game is over, so the scores are handed out exactly once
+        self.rewards = dict(zip(self.possible_agents, self._env.rewards))
         if self._render_mode == "human":
             self.render()
         self._accumulate_rewards()
 
+    def _select_next_agent(self) -> None:
+        # agents without moves pass until the game is over,
+        # observe() is what flags them as done
+        self._observations.clear()
+        self.observe(f"agent_{self._env.agent_selection}")
+        while self._env.terminations[self._env.agent_selection] and not all(
+            self._env.terminations
+        ):
+            self._env.step(None)
+            self._observations.clear()
+            self.observe(f"agent_{self._env.agent_selection}")
+        self.agent_selection = f"agent_{self._env.agent_selection}"
+
     def observe(self, agent: str) -> dict:
-        # cached until the next step
+        # cached until the next step, so the arrays are read-only
         if agent not in self._observations:
             obs = self._env.observe(int(agent.split("_")[1]))
+            board = (
+                np.frombuffer(obs.observation, dtype=np.uint8)
+                .reshape(-1, 20, 20)
+                .astype(bool)
+            )
+            board.flags.writeable = False
             self._observations[agent] = {
-                "observation": np.array(obs.observation, dtype=bool),
-                "action_mask": np.frombuffer(
-                    obs.action_mask, dtype=np.int8
-                ).copy(),
+                "observation": board,
+                # read-only view of the bytes from Rust
+                "action_mask": np.frombuffer(obs.action_mask, dtype=np.int8),
             }
-        return self._observations[agent]
+        return dict(self._observations[agent])
 
     def render(self) -> np.ndarray | None:
-        obs = self.observe(self.agents[0])["observation"]
+        obs = self.observe(self.possible_agents[0])["observation"]
 
         canvas = pygame.Surface((self._screen_size, self._screen_size))
         canvas.fill((255, 255, 255))

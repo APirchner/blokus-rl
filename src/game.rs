@@ -56,7 +56,7 @@ impl Game {
     pub fn observe(
         &mut self,
         agent_idx: usize,
-    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], Vec<bool>) {
+    ) -> ([[[bool; BOARD_SIZE]; BOARD_SIZE]; 4], Vec<u8>) {
         let boards = self.align_boards(agent_idx);
         if self.agents[agent_idx].turn > 0 && !self.agents[agent_idx].done {
             let blocked = boards[0].dilate_ortho() | boards[1] | boards[2] | boards[3];
