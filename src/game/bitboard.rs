@@ -151,15 +151,6 @@ impl ops::BitAnd for Bitboard {
     }
 }
 
-impl ops::BitAndAssign for Bitboard {
-    fn bitand_assign(&mut self, rhs: Self) {
-        self.0 &= rhs.0;
-        self.1 &= rhs.1;
-        self.2 &= rhs.2;
-        self.3 &= rhs.3;
-    }
-}
-
 impl ops::BitOr for Bitboard {
     type Output = Self;
 
@@ -169,28 +160,6 @@ impl ops::BitOr for Bitboard {
             self.1 | rhs.1,
             self.2 | rhs.2,
             self.3 | rhs.3,
-        )
-    }
-}
-
-impl ops::BitXorAssign for Bitboard {
-    fn bitxor_assign(&mut self, rhs: Self) {
-        self.0 ^= rhs.0;
-        self.1 ^= rhs.1;
-        self.2 ^= rhs.2;
-        self.3 ^= rhs.3;
-    }
-}
-
-impl ops::BitXor for Bitboard {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Bitboard(
-            self.0 ^ rhs.0,
-            self.1 ^ rhs.1,
-            self.2 ^ rhs.2,
-            self.3 ^ rhs.3,
         )
     }
 }

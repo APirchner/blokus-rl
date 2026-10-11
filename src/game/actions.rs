@@ -88,14 +88,6 @@ impl ActionSet {
     }
 }
 
-impl Index<PieceType> for ActionSet {
-    type Output = [Action];
-
-    fn index(&self, index: PieceType) -> &Self::Output {
-        &self.actions[self.piece_map[&index].start..self.piece_map[&index].end]
-    }
-}
-
 impl Index<usize> for ActionSet {
     type Output = Action;
 

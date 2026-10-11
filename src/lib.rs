@@ -66,8 +66,8 @@ impl PyBlokus {
             .unwrap_or_else(|| vec![0i16; self.0.num_agents])
     }
 
-    pub fn observe(&mut self, action_idx: usize) -> PyObservation {
-        let (observation, action_mask) = self.0.observe(action_idx);
+    pub fn observe(&mut self, agent_idx: usize) -> PyObservation {
+        let (observation, action_mask) = self.0.observe(agent_idx);
         PyObservation {
             observation,
             action_mask: action_mask.into_iter().map(u8::from).collect(),

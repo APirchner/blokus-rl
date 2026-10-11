@@ -1,5 +1,3 @@
-from typing import Any
-
 import numpy as np
 from gymnasium import spaces
 from pettingzoo import AECEnv
@@ -62,31 +60,31 @@ class BlokusEnv(AECEnv):
         return self.agents
 
     @property
-    def agent_selection(self) -> int:
+    def agent_selection(self) -> str:
         return f"agent_{self._env.agent_selection}"
 
     @property
-    def terminations(self) -> dict[int, bool]:
+    def terminations(self) -> dict[str, bool]:
         return {
             i: self._env.terminations[int(i.split("_")[1])]
             for i in self.agents
         }
 
     @property
-    def truncations(self) -> dict[int, bool]:
+    def truncations(self) -> dict[str, bool]:
         return {
             i: self._env.truncations[int(i.split("_")[1])]
             for i in self.agents
         }
 
     @property
-    def rewards(self) -> dict[int, dict[str, Any]]:
+    def rewards(self) -> dict[str, int]:
         return {
             i: self._env.rewards[int(i.split("_")[1])] for i in self.agents
         }
 
     @property
-    def infos(self) -> dict[int, bool]:
+    def infos(self) -> dict[str, dict]:
         return self._infos
 
     @property
@@ -165,7 +163,7 @@ class BlokusEnv(AECEnv):
             }
         return self._observations[agent]
 
-    def render(self) -> None:
+    def render(self) -> np.ndarray | None:
         obs = self.observe(self.agents[0])["observation"]
 
         canvas = pygame.Surface((self._screen_size, self._screen_size))
