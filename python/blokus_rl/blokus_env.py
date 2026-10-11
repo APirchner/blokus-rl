@@ -1,5 +1,4 @@
 from typing import Any
-from functools import lru_cache
 
 import numpy as np
 from gymnasium import spaces
@@ -43,11 +42,12 @@ class BlokusEnv(AECEnv):
             for i in self.agents
         }
         self._action_spaces = {
-            i: spaces.Discrete(self._env.num_actions, seed=seed)
-            for i in self.agents
+            i: spaces.Discrete(self._env.num_actions) for i in self.agents
         }
+        self._seed_action_spaces(seed)
         self._cumulative_rewards = {i: 0 for i in self.agents}
         self._infos = {i: {} for i in self.agents}
+        self._observations = {}
         self._render_mode = render_mode
         self._screen = None
         self._screen_size = screen_size
@@ -75,7 +75,7 @@ class BlokusEnv(AECEnv):
     @property
     def truncations(self) -> dict[int, bool]:
         return {
-            i: self._env.terminations[int(i.split("_")[1])]
+            i: self._env.truncations[int(i.split("_")[1])]
             for i in self.agents
         }
 
@@ -102,8 +102,21 @@ class BlokusEnv(AECEnv):
     def action_spaces(self):
         return self._action_spaces
 
+    def observation_space(self, agent: str) -> spaces.Space:
+        return self._observation_spaces[agent]
+
+    def action_space(self, agent: str) -> spaces.Space:
+        return self._action_spaces[agent]
+
+    def _seed_action_spaces(self, seed: int | None) -> None:
+        if seed is None:
+            return
+        # distinct seeds, otherwise all agents sample from the same stream
+        for i, space in enumerate(self._action_spaces.values()):
+            space.seed(seed + i)
+
     def _render_setup(self):
-        if self._render_mode is None:
+        if self._render_mode is None or self._screen is not None:
             return
 
         if self._render_mode == "human":
@@ -116,9 +129,7 @@ class BlokusEnv(AECEnv):
             self._clock = pygame.time.Clock()
             return
         elif self._render_mode == "rgb_array":
-            self.screen = pygame.Surface(
-                (self._screen_size, self._screen_size)
-            )
+            # render() draws onto its own canvas
             return
         raise NotImplementedError
 
@@ -126,27 +137,33 @@ class BlokusEnv(AECEnv):
         self, seed: int | None = None, options: dict | None = None
     ) -> None:
         self._cumulative_rewards = {i: 0 for i in self.agents}
-        self._info = {i: {} for i in self.agents}
-        for a in self.action_spaces:
-            self.action_spaces[a].seed(seed)
+        self._infos = {i: {} for i in self.agents}
+        self._seed_action_spaces(seed)
         self._env.reset()
-        self.observe.cache_clear()
+        self._observations.clear()
         self._render_setup()
 
     def step(self, action: int | None) -> None:
-        self.observe.cache_clear()
+        agent = self.agent_selection
         self._env.step(action)
+        self._observations.clear()
+        self._cumulative_rewards[agent] = 0
         self.observe(self.agent_selection)
-        if self._render_mode is not None:
+        if self._render_mode == "human":
             self.render()
+        self._accumulate_rewards()
 
-    @lru_cache(maxsize=4, typed=True)
     def observe(self, agent: str) -> dict:
-        obs = self._env.observe(int(agent.split("_")[1]))
-        return {
-            "observation": np.array(obs.observation, dtype=bool),
-            "action_mask": np.array(obs.action_mask, dtype=np.int8),
-        }
+        # cached until the next step
+        if agent not in self._observations:
+            obs = self._env.observe(int(agent.split("_")[1]))
+            self._observations[agent] = {
+                "observation": np.array(obs.observation, dtype=bool),
+                "action_mask": np.frombuffer(
+                    obs.action_mask, dtype=np.int8
+                ).copy(),
+            }
+        return self._observations[agent]
 
     def render(self) -> None:
         obs = self.observe(self.agents[0])["observation"]
@@ -203,4 +220,7 @@ class BlokusEnv(AECEnv):
             )
 
     def close(self) -> None:
-        ...
+        if self._screen is not None:
+            pygame.display.quit()
+            pygame.quit()
+            self._screen = None

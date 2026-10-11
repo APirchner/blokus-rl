@@ -54,7 +54,7 @@ impl Bitboard {
         for i in 0..BOARD_SIZE {
             let right_shift = (BOARD_SIZE + 1) * i;
             let left_shift = (BOARD_SIZE + 1) * (BOARD_SIZE - 1 - i);
-            board_flip |= ((self >> right_shift) & row_mask()) << left_shift;
+            board_flip |= ((self >> right_shift) & ROW_MASK) << left_shift;
         }
         board_flip
     }
@@ -82,7 +82,7 @@ impl Bitboard {
         let up = self >> (BOARD_SIZE + 1);
         let right = self << 1;
         let down = self << (BOARD_SIZE + 1);
-        (self | left | right | up | down) & separating_bit_mask()
+        (self | left | right | up | down) & SEPARATING_BIT_MASK
     }
 
     pub fn dilate_diag(self) -> Bitboard {
@@ -90,7 +90,7 @@ impl Bitboard {
         let right_up = self >> BOARD_SIZE;
         let left_down = self << BOARD_SIZE;
         let right_down = self << (BOARD_SIZE + 2);
-        (self | left_up | left_down | right_up | right_down) & separating_bit_mask()
+        (self | left_up | left_down | right_up | right_down) & SEPARATING_BIT_MASK
     }
 
     pub fn into_vecs(self) -> [[bool; BOARD_SIZE]; BOARD_SIZE] {
@@ -262,29 +262,18 @@ impl fmt::Display for Bitboard {
     }
 }
 
-fn row_mask() -> Bitboard {
-    Bitboard(
-        0,
-        0,
-        0,
-        [vec![1; BOARD_SIZE], vec![0; 1]]
-            .concat()
-            .iter()
-            .rev()
-            .fold(0, |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit)),
-    )
+/// Mask of the board cells in the first `rows` rows, excluding the separating bits.
+const fn rows_mask(rows: usize) -> Bitboard {
+    let mut words = [0u128; 4];
+    let mut idx = 0;
+    while idx < (BOARD_SIZE + 1) * rows {
+        if idx % (BOARD_SIZE + 1) != BOARD_SIZE {
+            words[3 - idx / 128] |= 1 << (idx % 128);
+        }
+        idx += 1;
+    }
+    Bitboard(words[0], words[1], words[2], words[3])
 }
 
-pub fn separating_bit_mask() -> Bitboard {
-    let bits: Vec<u8> = (0..BOARD_SIZE).fold(Vec::new(), |acc: Vec<u8>, _| {
-        [acc, vec![1; BOARD_SIZE], vec![0; 1]].concat()
-    });
-    let parse_bits = |acc: u128, bit: &u8| (acc << 1) + u128::from(*bit);
-
-    Bitboard(
-        bits[384..].iter().rev().fold(0, parse_bits),
-        bits[256..384].iter().rev().fold(0, parse_bits),
-        bits[128..256].iter().rev().fold(0, parse_bits),
-        bits[0..128].iter().rev().fold(0, parse_bits),
-    )
-}
+const ROW_MASK: Bitboard = rows_mask(1);
+pub const SEPARATING_BIT_MASK: Bitboard = rows_mask(BOARD_SIZE);

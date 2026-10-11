@@ -1,5 +1,6 @@
 use pyo3::exceptions::PyAssertionError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 mod game;
 
@@ -51,9 +52,11 @@ impl PyBlokus {
         self.0.terminations()
     }
 
+    /// Blokus has no turn limit, so agents are never truncated.
     #[getter(truncations)]
+    #[allow(clippy::unused_self)]
     pub fn truncations(&self) -> [bool; 4] {
-        self.0.terminations()
+        [false; 4]
     }
 
     #[getter(rewards)]
@@ -67,7 +70,7 @@ impl PyBlokus {
         let (observation, action_mask) = self.0.observe(action_idx);
         PyObservation {
             observation,
-            action_mask,
+            action_mask: action_mask.into_iter().map(u8::from).collect(),
         }
     }
 
@@ -83,7 +86,7 @@ impl PyBlokus {
 #[pyclass(unsendable)]
 struct PyObservation {
     observation: [[[bool; BOARD_SIZE]; BOARD_SIZE]; 4],
-    action_mask: Vec<bool>,
+    action_mask: Vec<u8>,
 }
 
 #[pymethods]
@@ -98,9 +101,10 @@ impl PyObservation {
         ]
     }
 
+    /// The action mask as bytes of 0/1, cheap to wrap with `numpy.frombuffer`.
     #[getter(action_mask)]
-    pub fn action_mask(&self) -> Vec<bool> {
-        self.action_mask.clone()
+    pub fn action_mask<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.action_mask)
     }
 }
 
@@ -120,7 +124,7 @@ mod _blokus {
 
 #[cfg(test)]
 mod tests {
-    use crate::game::bitboard::{Bitboard, separating_bit_mask};
+    use crate::game::bitboard::{Bitboard, SEPARATING_BIT_MASK};
     use crate::game::{BOARD_SIZE, Game};
 
     #[test]
@@ -129,7 +133,7 @@ mod tests {
         assert_eq!(game.action_set.actions.len(), 30433);
         for a in &game.action_set.actions {
             assert!(
-                (a.bitboard & !separating_bit_mask()) == Bitboard::default(),
+                (a.bitboard & !SEPARATING_BIT_MASK) == Bitboard::default(),
                 "Invalid action!"
             );
         }
