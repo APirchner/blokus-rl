@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::fmt;
-use std::iter;
 
 use super::bitboard::Bitboard;
 use super::pieces::PieceType;
@@ -13,34 +11,31 @@ pub enum Color {
     Green = 3,
 }
 
+/// All pieces available, bit `i` stands for `PieceType::ALL[i]`.
+pub const ALL_PIECES: u32 = (1 << PieceType::ALL.len()) - 1;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Agent {
     pub color: Color,
     pub board: Bitboard,
     pub turn: u8,
-    pub pieces: HashMap<PieceType, bool>,
+    /// Bit `i` is set while the agent still has the piece `PieceType::ALL[i]`.
+    pub pieces: u32,
     pub last_piece: Option<PieceType>,
-    pub action_mask: Vec<bool>,
-    pub action_mask_stale: bool,
     pub done: bool,
 }
 
 impl Agent {
-    pub fn new(color: Color, initial_actions: Vec<bool>) -> Self {
+    pub fn new(color: Color) -> Self {
         let board = Bitboard::default();
         let turn = 0;
         let done = false;
-        let action_mask_stale = false;
-        let action_mask = initial_actions;
-        let pieces: HashMap<PieceType, bool> =
-            iter::zip(PieceType::iter(), iter::repeat(true)).collect();
         Self {
             color,
             board,
             turn,
-            pieces,
+            pieces: ALL_PIECES,
             last_piece: None,
-            action_mask,
-            action_mask_stale,
             done,
         }
     }

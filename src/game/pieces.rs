@@ -28,36 +28,42 @@ pub enum PieceType {
 }
 
 impl PieceType {
+    /// Every piece type, in the order of the `pieces` observation axis.
+    pub const ALL: [PieceType; 21] = [
+        PieceType::I1,
+        PieceType::I2,
+        PieceType::V3,
+        PieceType::I3,
+        PieceType::T4,
+        PieceType::O,
+        PieceType::L4,
+        PieceType::I4,
+        PieceType::Z4,
+        PieceType::F,
+        PieceType::X,
+        PieceType::P,
+        PieceType::W,
+        PieceType::Z5,
+        PieceType::Y,
+        PieceType::L5,
+        PieceType::U,
+        PieceType::T5,
+        PieceType::V5,
+        PieceType::N,
+        PieceType::I5,
+    ];
+
     pub fn size(self) -> u8 {
         self as u8 % 6
     }
 
+    /// Position in `PieceType::ALL`.
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|p| *p == self).unwrap()
+    }
+
     pub fn iter() -> impl Iterator<Item = PieceType> {
-        [
-            PieceType::I1,
-            PieceType::I2,
-            PieceType::V3,
-            PieceType::I3,
-            PieceType::T4,
-            PieceType::O,
-            PieceType::L4,
-            PieceType::I4,
-            PieceType::Z4,
-            PieceType::F,
-            PieceType::X,
-            PieceType::P,
-            PieceType::W,
-            PieceType::Z5,
-            PieceType::Y,
-            PieceType::L5,
-            PieceType::U,
-            PieceType::T5,
-            PieceType::V5,
-            PieceType::N,
-            PieceType::I5,
-        ]
-        .iter()
-        .copied()
+        Self::ALL.iter().copied()
     }
 }
 

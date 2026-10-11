@@ -38,8 +38,33 @@ for agent in env.agent_iter():
 print(scores)
 ```
 
-Rewards are each agent's own Blokus score: minus the squares of its remaining pieces, +15 for placing all pieces, +20 if the monomino was placed last.
-An agent gets its score as soon as it is out of moves, since it can never get moves back. Competitive objectives such as win/loss or rank can be computed from the scores at the end of the episode.
+## Rewards
+All rewards build on the official Blokus score: minus the squares of the remaining pieces, +15 for placing all pieces, +20 if the monomino was placed last.
+`BlokusEnv(reward_mode=...)` selects the reward:
+
+| `reward_mode` | Reward | When |
+|---|---|---|
+| `"score"` (default) | The agent's own score | As soon as the agent is out of moves, since it can never get moves back. It then leaves the game. |
+| `"win_share"` | 1/k if among the k agents tied for the top score, else 0; rewards sum to 1 | At game end, to all agents at once |
+| `"rank"` | Place points 1, 2/3, 1/3, 0; tied agents share the average of their places' points | At game end, to all agents at once |
+
+In `win_share` and `rank` modes, an agent without moves is not terminated before the game is over; its turns are skipped.
+At game end, `infos[agent]["scores"]` holds the final scores of all agents, for every agent still in the game. In `score` mode, agents that ran out of moves earlier have already left.
+
+## Observation
+The observation is a dict, in the frame of the observing agent.
+The agent axis is agent-relative: the agent itself, the next to move, the one after, and the previous one.
+
+| Key | Shape, dtype | Content |
+|---|---|---|
+| `observation` | (4, 20, 20) bool | Occupied cells per agent |
+| `action_mask` | (36400,) int8 | Legal actions, see [Action space](#action-space) |
+| `pieces` | (4, 21) bool | Pieces each agent still has, in the order of `env.piece_names` |
+| `corners` | (4, 20, 20) bool | Free cells diagonal but not edge-adjacent to the agent's pieces, or its start cell before its first piece |
+| `blocked` | (4, 20, 20) bool | Cells the agent can never fill: occupied by anyone, or edge-adjacent to its own pieces |
+| `done` | (4,) bool | Agent is out of moves |
+| `seat` | Discrete(4) | The observing agent's place in turn order; 0 moves first |
+| `ply` | () int16 | Placements made so far, by all agents |
 
 ## Action space
 Every action places one of the 91 piece orientations (21 pieces in all their distinct rotations and flips) on the 20x20 board.
@@ -50,6 +75,18 @@ Positions where the piece would not fit on the board are always masked.
 ```python
 action_mask = observation["action_mask"].reshape(env.action_grid_shape)
 orientation, row, col = np.unravel_index(action, env.action_grid_shape)
+```
+
+## Copying and saving states
+`copy.deepcopy(env)` copies an environment, e.g. to branch off a tree search; the copy plays on independently and does not render.
+`env._env.copy()` copies only the game, which is much cheaper.
+The game state can also be saved as bytes and restored:
+
+```python
+from blokus_rl._blokus import PyBlokus
+
+state = env._env.to_bytes()
+game = PyBlokus.from_bytes(state)
 ```
 
 ## Motivation

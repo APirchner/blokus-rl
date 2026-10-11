@@ -9,6 +9,14 @@ pub const MAX_IDX: usize = (BOARD_SIZE * (BOARD_SIZE + 1)) - 1;
 pub struct Bitboard(pub u128, pub u128, pub u128, pub u128);
 
 impl Bitboard {
+    /// The board with only the cell at (`row`, `col`) set.
+    pub const fn cell(row: usize, col: usize) -> Bitboard {
+        let idx = (BOARD_SIZE + 1) * row + col;
+        let mut words = [0u128; 4];
+        words[3 - idx / 128] = 1 << (idx % 128);
+        Bitboard(words[0], words[1], words[2], words[3])
+    }
+
     pub fn is_empty(&self) -> bool {
         ((self.0 & (u128::MAX >> 92)) | self.1 | self.2 | self.3) == 0
     }

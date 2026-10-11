@@ -70,21 +70,14 @@ impl ActionSet {
         }
     }
 
-    /// Scatters an action mask into the flattened (orientation, row, col) grid, as bytes of 0/1.
-    pub fn grid_mask(&self, action_mask: &[bool]) -> Vec<u8> {
+    /// Scatters the indices of the legal actions into the flattened (orientation, row, col) grid,
+    /// as bytes of 0/1.
+    pub fn grid_mask(&self, legal: impl Iterator<Item = usize>) -> Vec<u8> {
         let mut grid = vec![0; self.grid_map.len()];
-        for (a, valid) in self.actions.iter().zip(action_mask) {
-            grid[a.grid_idx] = u8::from(*valid);
+        for a in legal {
+            grid[self.actions[a].grid_idx] = 1;
         }
         grid
-    }
-
-    pub fn initial_actions(&self) -> Vec<bool> {
-        let mut init_actions = Vec::with_capacity(self.actions.len());
-        for p in &self.actions {
-            init_actions.push(!(p.bitboard & Bitboard(0, 0, 0, 1)).is_empty());
-        }
-        init_actions
     }
 }
 
