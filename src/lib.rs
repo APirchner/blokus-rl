@@ -52,11 +52,10 @@ impl PyBlokus {
         self.0.terminations()
     }
 
+    /// The score of every agent that is done, None for the others.
     #[getter(rewards)]
-    pub fn rewards(&self) -> Vec<i16> {
-        self.0
-            .rewards()
-            .unwrap_or_else(|| vec![0i16; self.0.num_agents])
+    pub fn rewards(&self) -> Vec<Option<i16>> {
+        self.0.rewards()
     }
 
     pub fn observe(&mut self, agent_idx: usize) -> PyObservation {
@@ -188,15 +187,14 @@ mod tests {
         game.observe(1);
         game.step(a22).unwrap();
         game.observe(2);
-        assert!(game.rewards().is_none());
+        assert_eq!(game.rewards(), [None; 4]);
+        // scores are handed out per agent, as soon as it is done
         game.agents[0].done = true;
+        assert_eq!(game.rewards(), [Some(-86), None, None, None]);
         game.agents[1].done = true;
         game.agents[2].done = true;
         game.agents[3].done = true;
-        assert_eq!(game.rewards().unwrap()[0], -86);
-        assert_eq!(game.rewards().unwrap()[1], -86);
-        assert_eq!(game.rewards().unwrap()[2], -87);
-        assert_eq!(game.rewards().unwrap()[3], -87);
+        assert_eq!(game.rewards(), [Some(-86), Some(-86), Some(-87), Some(-87)]);
     }
 
     #[test]
@@ -223,9 +221,9 @@ mod tests {
         for a in &mut game.agents {
             a.done = true;
         }
-        let rewards = game.rewards().unwrap();
-        assert_eq!(rewards[0], 20);
-        assert_eq!(rewards[1], 15);
+        let rewards = game.rewards();
+        assert_eq!(rewards[0], Some(20));
+        assert_eq!(rewards[1], Some(15));
     }
 
     #[test]

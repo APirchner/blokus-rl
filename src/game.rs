@@ -93,32 +93,27 @@ impl Game {
         ]
     }
 
-    pub fn rewards(&self) -> Option<Vec<i16>> {
-        let game_done = self.terminations().iter().all(|x| *x);
-        if !game_done {
-            return None;
-        }
-        let scores_raw: Vec<u8> = self
-            .agents
+    /// The score of every agent that is done, it is final since an agent never regains moves.
+    pub fn rewards(&self) -> Vec<Option<i16>> {
+        self.agents
             .iter()
-            .map(|x| {
-                x.pieces
+            .map(|a| {
+                if !a.done {
+                    return None;
+                }
+                let remaining = a
+                    .pieces
                     .iter()
                     .filter(|y| *y.1)
-                    .fold(0u8, |acc, p| acc + p.0.size())
+                    .fold(0u8, |acc, p| acc + p.0.size());
+                Some(match remaining {
+                    // +5 bonus if the monomino was placed last
+                    0 if a.last_piece == Some(PieceType::I1) => 20,
+                    0 => 15,
+                    x => -i16::from(x),
+                })
             })
-            .collect();
-        let scores = scores_raw
-            .iter()
-            .zip(&self.agents)
-            .map(|(x, a)| match x {
-                // +5 bonus if the monomino was placed last
-                0 if a.last_piece == Some(PieceType::I1) => 20,
-                0 => 15,
-                x => -i16::from(*x),
-            })
-            .collect();
-        Some(scores)
+            .collect()
     }
 
     /// Plays the action at `grid_idx` of the flattened (orientation, row, col) action grid.

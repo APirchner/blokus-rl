@@ -117,33 +117,34 @@ class BlokusEnv(AECEnv):
     def step(self, action: int | None) -> None:
         agent = self.agent_selection
         if self.terminations[agent] or self.truncations[agent]:
-            # only once the game is over, then every agent is removed in turn
+            # the agent leaves, the game keeps passing its turn
             self._was_dead_step(action)
-            return
-        self._env.step(action)
-        self._cumulative_rewards[agent] = 0
+            self._env.step(None)
+        else:
+            self._env.step(action)
+            self._cumulative_rewards[agent] = 0
+            self._clear_rewards()
         self._select_next_agent()
-        self.terminations = dict(
-            zip(self.possible_agents, self._env.terminations)
-        )
-        # 0 until the game is over, so the scores are handed out exactly once
-        self.rewards = dict(zip(self.possible_agents, self._env.rewards))
         if self._render_mode == "human":
             self.render()
         self._accumulate_rewards()
 
     def _select_next_agent(self) -> None:
-        # agents without moves pass until the game is over,
-        # observe() is what flags them as done
+        # agents that left pass until the game is over
         self._observations.clear()
-        self.observe(f"agent_{self._env.agent_selection}")
-        while self._env.terminations[self._env.agent_selection] and not all(
-            self._env.terminations
-        ):
+        while self.agents:
+            idx = self._env.agent_selection
+            agent = f"agent_{idx}"
+            if agent in self.agents:
+                # observe() is what flags an agent without moves as done,
+                # its score is final then and handed out right away
+                self.observe(agent)
+                if self._env.terminations[idx]:
+                    self.terminations[agent] = True
+                    self.rewards[agent] = self._env.rewards[idx]
+                self.agent_selection = agent
+                return
             self._env.step(None)
-            self._observations.clear()
-            self.observe(f"agent_{self._env.agent_selection}")
-        self.agent_selection = f"agent_{self._env.agent_selection}"
 
     def observe(self, agent: str) -> dict:
         # cached until the next step, so the arrays are read-only
