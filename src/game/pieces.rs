@@ -116,11 +116,14 @@ impl Piece {
         Bitboard(0, 0, 0, self.decode())
     }
 
-    pub fn build_translations(&self) -> Vec<Bitboard> {
-        let mut trans: Vec<Bitboard> = Vec::with_capacity(self.max_row * self.max_col);
+    /// Returns all translations as (cell index `row * BOARD_SIZE + col` of the bounding box origin, bitboard).
+    pub fn build_translations(&self) -> Vec<(usize, Bitboard)> {
+        let mut trans: Vec<(usize, Bitboard)> =
+            Vec::with_capacity((self.max_row + 1) * (self.max_col + 1));
+        let bitboard = self.to_bitboard();
         for i in 0..=self.max_row {
             for j in 0..=self.max_col {
-                trans.push(self.to_bitboard().translate_origin(j, i));
+                trans.push((i * BOARD_SIZE + j, bitboard.translate_origin(j, i)));
             }
         }
         trans

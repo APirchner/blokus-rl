@@ -34,6 +34,17 @@ for i, agent in enumerate(env.agent_iter()):
 print(env.rewards)
 ```
 
+## Action space
+Every action places one of the 91 piece orientations (21 pieces in all their distinct rotations and flips) on the 20x20 board.
+Actions are laid out as a grid of shape `(orientation, row, col)` = `env.action_grid_shape` = `(91, 20, 20)` and flattened in C order into `Discrete(36400)`:
+`(row, col)` is the top-left corner of the piece's bounding box, in the frame of the acting agent.
+Positions where the piece would not fit on the board are always masked.
+
+```python
+action_mask = observation["action_mask"].reshape(env.action_grid_shape)
+orientation, row, col = np.unravel_index(action, env.action_grid_shape)
+```
+
 ## Motivation
 I'm not a passionate gamer and get frustrated quite easily when a board game does not go my way. For some reason, I always enjoy playing Blokus - wheter I'm winning or not. And being a computer scientist by training, I was always wondering what weird/effective strategies a powerful RL agent would uncover.
 
