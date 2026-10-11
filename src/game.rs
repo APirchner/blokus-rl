@@ -9,6 +9,7 @@ use self::agents::{Agent, Color};
 pub use self::bitboard::BOARD_SIZE;
 use self::bitboard::{Bitboard, MAX_IDX};
 use self::errors::InvalidAction;
+use self::pieces::PieceType;
 use std::fmt;
 use std::fmt::Write as _;
 use std::sync::OnceLock;
@@ -109,7 +110,10 @@ impl Game {
             .collect();
         let scores = scores_raw
             .iter()
-            .map(|x| match x {
+            .zip(&self.agents)
+            .map(|(x, a)| match x {
+                // +5 bonus if the monomino was placed last
+                0 if a.last_piece == Some(PieceType::I1) => 20,
                 0 => 15,
                 x => -i16::from(*x),
             })
@@ -162,6 +166,7 @@ impl Game {
         agent.board |= action.bitboard;
         agent.turn += 1;
         agent.pieces.insert(action.piece_type, false);
+        agent.last_piece = Some(action.piece_type);
         // mask the played piece
         let piece_range = self.action_set.piece_map[&action.piece_type].clone();
         agent.action_mask[piece_range].fill(false);

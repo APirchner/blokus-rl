@@ -206,6 +206,35 @@ mod tests {
     }
 
     #[test]
+    fn test_scoring_monomino_bonus() {
+        // +15 for placing all pieces, +5 if the last one was the monomino
+        let mut game = Game::new();
+        for (agent, last_size) in [(0, 1), (1, 2)] {
+            let action = *game
+                .action_set
+                .actions
+                .iter()
+                .enumerate()
+                .find(|(i, a)| {
+                    a.piece_type.size() == last_size && game.agents[agent].action_mask[*i]
+                })
+                .unwrap()
+                .1;
+            for available in game.agents[agent].pieces.values_mut() {
+                *available = false;
+            }
+            game.agents[agent].pieces.insert(action.piece_type, true);
+            game.step(Some(action.grid_idx)).unwrap();
+        }
+        for a in &mut game.agents {
+            a.done = true;
+        }
+        let rewards = game.rewards().unwrap();
+        assert_eq!(rewards[0], 20);
+        assert_eq!(rewards[1], 15);
+    }
+
+    #[test]
     fn test_grid_map_bijective() {
         let game = Game::new();
         let action_set = &game.action_set;
