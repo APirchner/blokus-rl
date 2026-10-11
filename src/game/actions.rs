@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::{Index, Range};
 
-use crate::game::bitboard::{Bitboard, BOARD_SIZE};
+use crate::game::bitboard::{BOARD_SIZE, Bitboard};
 use crate::game::pieces::{Piece, PieceType};
 
 #[derive(Clone, Copy, Debug)]

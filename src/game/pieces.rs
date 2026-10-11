@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use super::bitboard::{Bitboard, BOARD_SIZE};
+use super::bitboard::{BOARD_SIZE, Bitboard};
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
 pub enum PieceType {

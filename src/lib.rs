@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 mod game;
 
 use game::errors::InvalidAction;
-use game::{Game, BOARD_SIZE};
+use game::{BOARD_SIZE, Game};
 
 #[pyclass(unsendable)]
 struct PyBlokus(Game);
@@ -120,8 +120,8 @@ mod _blokus {
 
 #[cfg(test)]
 mod tests {
-    use crate::game::bitboard::{separating_bit_mask, Bitboard};
-    use crate::game::{Game, BOARD_SIZE};
+    use crate::game::bitboard::{Bitboard, separating_bit_mask};
+    use crate::game::{BOARD_SIZE, Game};
 
     #[test]
     fn test_action_generation_valid() {
