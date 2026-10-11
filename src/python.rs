@@ -4,8 +4,9 @@ use pyo3::exceptions::{PyAssertionError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
 
+use crate::game::bitboard::Bitboard;
 use crate::game::errors::InvalidAction;
-use crate::game::{BOARD_SIZE, GLOBALS_LEN, Game, PLANES_LEN, PieceType, RewardMode};
+use crate::game::{ACTION_GRID_SHAPE, BOARD_SIZE, Game, PieceType, RewardMode, write_planes};
 
 #[pyclass]
 struct PyBlokus(Game);
@@ -49,19 +50,16 @@ impl PyBlokus {
     }
 
     /// Size of the flattened (orientation, row, col) action grid.
-    #[getter(num_actions)]
-    pub fn num_actions(&self) -> usize {
-        self.0.action_set.grid_map.len()
+    #[classattr]
+    pub fn num_actions() -> usize {
+        let (orientations, rows, cols) = ACTION_GRID_SHAPE;
+        orientations * rows * cols
     }
 
     /// Shape (orientation, row, col) of the action grid, in C order.
-    #[getter(action_grid_shape)]
-    pub fn action_grid_shape(&self) -> (usize, usize, usize) {
-        (
-            self.0.action_set.grid_map.len() / (BOARD_SIZE * BOARD_SIZE),
-            BOARD_SIZE,
-            BOARD_SIZE,
-        )
+    #[classattr]
+    pub fn action_grid_shape() -> (usize, usize, usize) {
+        ACTION_GRID_SHAPE
     }
 
     /// The piece names, in the order of the observation's piece axis.
@@ -111,24 +109,19 @@ impl PyBlokus {
     }
 
     pub fn observe(&self, agent_idx: usize) -> PyObservation {
-        let mut planes = vec![0; PLANES_LEN];
-        let mut globals = [0.0; GLOBALS_LEN];
-        self.0.encode_for(agent_idx, &mut planes, &mut globals);
-        let plane_len = PLANES_LEN / 3;
+        let obs = self.0.observe(agent_idx);
         let mut moves = Vec::new();
-        self.0.legal_moves_for(agent_idx, &mut moves);
-        // the globals are 0/1 up to the seat
-        let flags: Vec<u8> = globals[..GLOBALS_LEN - 2]
+        self.0.observed_moves(&obs, &mut moves);
+        let pieces = obs
+            .pieces
             .iter()
-            .map(|x| u8::from(*x > 0.5))
-            .collect();
-        let (pieces, done) = flags.split_at(4 * PieceType::ALL.len());
+            .flat_map(|p| (0..PieceType::ALL.len()).map(move |i| u8::from(p & (1 << i) != 0)));
         PyObservation {
-            observation: planes[..plane_len].to_vec(),
-            corners: planes[plane_len..2 * plane_len].to_vec(),
-            blocked: planes[2 * plane_len..].to_vec(),
-            pieces: pieces.to_vec(),
-            done: done.to_vec(),
+            observation: planes(&obs.boards),
+            corners: planes(&obs.corners),
+            blocked: planes(&obs.blocked),
+            pieces: pieces.collect(),
+            done: obs.done.map(u8::from).to_vec(),
             action_mask: self
                 .0
                 .action_set
@@ -194,6 +187,13 @@ impl PyObservation {
     pub fn action_mask<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.action_mask)
     }
+}
+
+/// The agents' boards as (agent, row, col) bytes of 0/1.
+fn planes(boards: &[Bitboard; 4]) -> Vec<u8> {
+    let mut planes = vec![0; 4 * BOARD_SIZE * BOARD_SIZE];
+    write_planes(boards, &mut planes);
+    planes
 }
 
 impl From<InvalidAction> for PyErr {

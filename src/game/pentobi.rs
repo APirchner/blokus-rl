@@ -64,7 +64,8 @@ pub fn from_pentobi(agent: usize, mv: &str) -> Option<u16> {
 
 impl Game {
     /// The game after `moves`, each an agent and its Pentobi move, such as a game played by
-    /// Pentobi. `pass` is accepted for agents that are out of moves.
+    /// Pentobi. `pass` is accepted from an agent that is out of moves, on its turn in the turn
+    /// order.
     ///
     /// # Errors
     ///
@@ -76,9 +77,11 @@ impl Game {
         for (agent, mv) in moves {
             let error = || InvalidAction::new(format!("Agent {agent} can not play {mv}"));
             if mv == "pass" {
-                if !game.agents.get(agent).ok_or_else(error)?.done {
+                // the turn of the agent after the last move, even if it is out of moves
+                if agent != game.agent_selection || !game.agents[agent].done {
                     return Err(error());
                 }
+                game.agent_selection = (agent + 1) % 4;
                 continue;
             }
             if agent != game.current_player() {

@@ -413,10 +413,15 @@ mod tests {
         for _ in 0..RANDOM_GAMES {
             play_out_search(&mut Game::new(), &mut rng, |game| {
                 for agent in 0..4 {
+                    let oracle: Vec<u16> = game.oracle_moves(agent).collect();
                     game.legal_moves_for(agent, &mut moves);
                     moves.sort_unstable();
-                    assert_eq!(moves, game.oracle_moves(agent).collect::<Vec<_>>());
+                    assert_eq!(moves, oracle);
                     assert_eq!(moves.is_empty(), game.agents[agent].done);
+                    // the moves of the Python observation
+                    game.observed_moves(&game.observe(agent), &mut moves);
+                    moves.sort_unstable();
+                    assert_eq!(moves, oracle);
                 }
                 let current = game.current_player();
                 assert!(game.is_over() || !game.agents[current].done);
@@ -463,6 +468,26 @@ mod tests {
             }
         }
         assert!(transpositions > 100, "only {transpositions} transpositions");
+    }
+
+    #[test]
+    fn test_hash_of_finished_game() {
+        let mut game = Game::new();
+        play_out_search(&mut game, &mut Rng::new(9), |_| {});
+        let hash = game.hash();
+        // agents that are done pass, and the selected agent does not matter once all are
+        for _ in 0..4 {
+            game.step(None).unwrap();
+            assert_eq!(game.hash(), hash);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "The game is over")]
+    fn test_apply_after_game_over_panics() {
+        let mut game = Game::new();
+        play_out_search(&mut game, &mut Rng::new(10), |_| {});
+        game.apply(0);
     }
 
     #[test]
@@ -552,15 +577,21 @@ mod tests {
         assert_eq!(corners, ["a20", "t20", "t1", "a1"]);
     }
 
-    #[test]
-    fn test_pentobi_game_replays() {
-        // a game Pentobi played against itself, recorded by tests/pentobi_game.py
+    /// The agents and moves of a game Pentobi played against itself, recorded by
+    /// `tests/pentobi_game.py`, and its final score line.
+    fn pentobi_record() -> (Vec<(usize, &'static str)>, &'static str) {
         let record = include_str!("../tests/pentobi_game.txt");
         let (moves, final_score) = record.trim_end().rsplit_once('\n').unwrap();
         let moves = moves.lines().map(|line| {
             let (color, mv) = line.split_once(' ').unwrap();
             (color.parse::<usize>().unwrap() - 1, mv)
         });
+        (moves.collect(), final_score)
+    }
+
+    #[test]
+    fn test_pentobi_game_replays() {
+        let (moves, final_score) = pentobi_record();
         let game = Game::from_moves(moves).unwrap();
         assert!(game.is_over());
         let points: Vec<i16> = final_score
@@ -593,5 +624,21 @@ mod tests {
             assert!(Game::from_moves(moves).is_err());
         }
         assert!(Game::from_moves([(0, "a20"), (1, "t20")]).is_ok());
+    }
+
+    #[test]
+    fn test_from_moves_rejects_passes_out_of_turn() {
+        let (moves, _) = pentobi_record();
+        let pass = moves.iter().position(|(_, mv)| *mv == "pass").unwrap();
+        // the first pass, repeated
+        let mut repeated = moves[..=pass].to_vec();
+        repeated.push(moves[pass]);
+        // the first pass, after the next agent's move
+        let mut late = moves[..pass + 2].to_vec();
+        late.swap(pass, pass + 1);
+        assert!(Game::from_moves(moves[..pass + 2].to_vec()).is_ok());
+        for moves in [repeated, late] {
+            assert!(Game::from_moves(moves).is_err());
+        }
     }
 }

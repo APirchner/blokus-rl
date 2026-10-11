@@ -145,9 +145,10 @@ impl Game {
     ///
     /// # Panics
     ///
-    /// If `action` is not below 30,433, the number of actions.
+    /// If the game is over, or `action` is not below 30,433, the number of actions.
     pub fn apply(&mut self, action: u16) {
         let agent = self.current_player();
+        assert!(!self.agents[agent].done, "The game is over");
         debug_assert!(
             self.is_legal(agent, usize::from(action)),
             "Illegal action {action} for agent {agent}"
@@ -156,8 +157,8 @@ impl Game {
         self.agent_selection = (agent + 1) % 4;
     }
 
-    /// The Zobrist hash of the position: the cells of every agent, the agent to move, and the
-    /// agents that earned the monomino bonus.
+    /// The Zobrist hash of the position: the cells of every agent, the agent to move until the
+    /// game is over, and the agents that earned the monomino bonus.
     #[must_use]
     pub fn hash(&self) -> u64 {
         let bonus = (0..4)
@@ -165,7 +166,13 @@ impl Game {
                 self.agents[*a].pieces == 0 && self.agents[*a].last_piece == Some(PieceType::I1)
             })
             .fold(0, |h, a| h ^ BONUS_KEYS[a]);
-        self.zobrist ^ TURN_KEYS[self.current_player()] ^ bonus
+        // a finished game has no agent to move, however it was reached
+        let turn = if self.is_over() {
+            0
+        } else {
+            TURN_KEYS[self.current_player()]
+        };
+        self.zobrist ^ turn ^ bonus
     }
 
     /// Writes the observation of the agent to move into `planes` and `globals`, see `PLANES_LEN`
@@ -258,7 +265,8 @@ impl Game {
     /// # Errors
     ///
     /// If the selected agent has moves and `grid_idx` is not one of them.
-    pub fn step(&mut self, grid_idx: Option<usize>) -> Result<(), InvalidAction> {
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn step(&mut self, grid_idx: Option<usize>) -> Result<(), InvalidAction> {
         let agent = self.agent_selection;
         if !self.agents[agent].done {
             let action = grid_idx
@@ -328,9 +336,23 @@ impl Game {
     /// Writes the legal actions of the agent into `out`, in its frame.
     pub(crate) fn legal_moves_for(&self, agent: usize, out: &mut Vec<u16>) {
         out.clear();
+        let (blocked, corners) = self.placement_masks(agent);
         let into_agent_frame = &self.action_set.rotated[(4 - agent) % 4];
-        let _ = self.for_each_placement(agent, |global| {
-            out.push(into_agent_frame[global]);
+        let pieces = self.agents[agent].pieces;
+        let _ = self.for_each_placement(pieces, blocked, corners, |global| {
+            out.push(into_agent_frame[usize::from(global)]);
+            ControlFlow::Continue(())
+        });
+    }
+
+    /// Writes the legal actions of the agent that observed `obs` into `out`, in its frame, as
+    /// `legal_moves_for` but from the masks of the observation.
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) fn observed_moves(&self, obs: &Observation, out: &mut Vec<u16>) {
+        out.clear();
+        // the masks are in the agent's frame, and so are the placements found from them
+        let _ = self.for_each_placement(obs.pieces[0], obs.blocked[0], obs.corners[0], |action| {
+            out.push(action);
             ControlFlow::Continue(())
         });
     }
@@ -339,15 +361,8 @@ impl Game {
     #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     pub(crate) fn encode_for(&self, agent: usize, planes: &mut [u8], globals: &mut [f32]) {
         let obs = self.observe(agent);
-        let planes = &mut planes[..PLANES_LEN];
-        planes.fill(0);
-        let boards = obs.boards.iter().chain(&obs.corners).chain(&obs.blocked);
-        for (plane, board) in boards.enumerate() {
-            for idx in board.ones() {
-                // the separating bit ends every row of the board
-                planes[plane * BOARD_SIZE * BOARD_SIZE + idx - idx / (BOARD_SIZE + 1)] = 1;
-            }
-        }
+        let boards = [obs.boards, obs.corners, obs.blocked];
+        write_planes(boards.as_flattened(), &mut planes[..PLANES_LEN]);
         let pieces = obs
             .pieces
             .iter()
@@ -383,21 +398,21 @@ impl Game {
         (blocked, corners(own, blocked, START_CELLS[agent]))
     }
 
-    /// Calls `visit` with every legal action of the agent, in the frame of agent 0, until it
-    /// breaks. Only the placements that cover one of the agent's corners are tested.
+    /// Calls `visit` with every placement of the `pieces` that avoids the `blocked` cells and covers
+    /// one of the `corners`, in the frame of the masks, until it breaks. Only the placements that
+    /// cover a corner are tested.
     fn for_each_placement(
         &self,
-        agent: usize,
-        mut visit: impl FnMut(usize) -> ControlFlow<()>,
+        pieces: u32,
+        blocked: Bitboard,
+        corners: Bitboard,
+        mut visit: impl FnMut(u16) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
-        let pieces = self.agents[agent].pieces;
-        let (blocked, corners) = self.placement_masks(agent);
         let mut skip = blocked;
         for corner in corners.ones() {
             for piece in (0..PieceType::ALL.len()).filter(|i| pieces & (1 << i) != 0) {
                 for &action in self.action_set.covering(corner, piece) {
-                    let action = usize::from(action);
-                    if (self.action_set[action].bitboard & skip).is_empty() {
+                    if (self.action_set[usize::from(action)].bitboard & skip).is_empty() {
                         visit(action)?;
                     }
                 }
@@ -425,7 +440,10 @@ impl Game {
     fn update_done(&mut self) {
         for i in 0..4 {
             if !self.agents[i].done {
-                let done = self.for_each_placement(i, |_| ControlFlow::Break(()));
+                let (blocked, corners) = self.placement_masks(i);
+                let pieces = self.agents[i].pieces;
+                let done =
+                    self.for_each_placement(pieces, blocked, corners, |_| ControlFlow::Break(()));
                 self.agents[i].done = done.is_continue();
             }
         }
@@ -443,6 +461,17 @@ fn into_frame(board: Bitboard, agent: usize) -> Bitboard {
         1 => board.rotate_anticlock(),
         2 => board.rotate_clock().rotate_clock(),
         _ => board.rotate_clock(),
+    }
+}
+
+/// Writes the `boards` into `planes` as (board, row, col) bytes of 0/1.
+pub(crate) fn write_planes(boards: &[Bitboard], planes: &mut [u8]) {
+    planes.fill(0);
+    for (plane, board) in boards.iter().enumerate() {
+        for idx in board.ones() {
+            // the separating bit ends every row of the board
+            planes[plane * BOARD_SIZE * BOARD_SIZE + idx - idx / (BOARD_SIZE + 1)] = 1;
+        }
     }
 }
 

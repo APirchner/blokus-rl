@@ -22,7 +22,12 @@ def main(pentobi_gtp: str) -> None:
     def send(command: str) -> str:
         engine.stdin.write(command + "\n")
         engine.stdin.flush()
-        response = "".join(iter(engine.stdout.readline, "\n")).strip()
+        # a response ends with an empty line, readline() returns "" once Pentobi exits
+        response = ""
+        while (line := engine.stdout.readline()) != "\n":
+            assert line, f"{command}: Pentobi exited"
+            response += line
+        response = response.strip()
         assert response.startswith("="), f"{command}: {response}"
         return response[1:].strip()
 

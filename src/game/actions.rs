@@ -30,7 +30,6 @@ pub struct ActionSet {
     cover: Vec<u16>,
     /// Where the group of each (bit, piece) starts in `cover`, it ends where the next one starts.
     cover_start: Vec<usize>,
-    by_bitboard: HashMap<Bitboard, u16>,
 }
 
 impl ActionSet {
@@ -57,7 +56,11 @@ impl ActionSet {
 
     /// The action that covers exactly the cells of `bitboard`, if there is one.
     pub(crate) fn find(&self, bitboard: Bitboard) -> Option<u16> {
-        self.by_bitboard.get(&bitboard).copied()
+        let idx = bitboard.ones().next()?;
+        (0..PieceType::ALL.len())
+            .flat_map(|piece| self.covering(idx, piece))
+            .copied()
+            .find(|a| self.actions[usize::from(*a)].bitboard == bitboard)
     }
 
     fn new(pieces: &[Piece]) -> Self {
@@ -112,7 +115,6 @@ impl ActionSet {
             rotated,
             cover: groups.concat(),
             cover_start,
-            by_bitboard,
         }
     }
 
